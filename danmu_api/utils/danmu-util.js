@@ -442,7 +442,7 @@ export function postProcessDanmu(danmuData) {
   });
 
   return {
-    errorCode: danmuData.errorCode,
+    code: danmuData.errorCode,
     success: danmuData.success,
     errorMessage: danmuData.errorMessage,
     danmu: danmuData.count || danmuku.length,
