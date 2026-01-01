@@ -220,12 +220,9 @@ export default class DoubanSource extends BaseSource {
 
   async getEpisodeDanmu(id) {}
 
-  async getDanmu(doubanId, episodeNumber) {
+  async getDanmu(doubanId) {
     try {
-      log(
-        "info",
-        `[Douban] getDanmu for doubanId: ${doubanId}, episode: ${episodeNumber}`
-      );
+      log("info", `[Douban] getDanmu (all episodes) for doubanId: ${doubanId}`);
 
       // 获取平台详情页面url
       const response = await getDoubanDetail(doubanId);
@@ -234,10 +231,13 @@ export default class DoubanSource extends BaseSource {
         return null;
       }
 
+      const episodeMap = {};
+
       for (const vendor of response.data?.vendors ?? []) {
         if (!vendor) continue;
 
-        let videoUrl = null;
+        let eps = [];
+        let provider = "";
 
         // 根据不同平台获取对应的视频链接
         switch (vendor.id) {
@@ -245,25 +245,8 @@ export default class DoubanSource extends BaseSource {
             const cid = new URL(vendor.uri).searchParams.get("cid");
             if (cid) {
               log("info", `[Douban] Found Tencent cid: ${cid}`);
-              const eps = await this.tencentSource.getEpisodes(cid);
-              const targetEp =
-                eps.find((ep) => {
-                  // 尝试匹配集数
-                  if (
-                    ep.title &&
-                    (ep.title === `第${episodeNumber}集` ||
-                      ep.title.includes(`第${episodeNumber}集`))
-                  )
-                    return true;
-                  // 尝试匹配顺序 (假设 eps 是按顺序排列的)
-                  // 腾讯源返回的 eps 直接就是列表，索引+1即为集数，或者 ep.title
-                  return false;
-                }) || eps[episodeNumber - 1]; // Fallback to index
-
-              if (targetEp) {
-                // 腾讯源构建URL逻辑: https://v.qq.com/x/cover/{cid}/{vid}.html
-                videoUrl = `https://v.qq.com/x/cover/${cid}/${targetEp.vid}.html`;
-              }
+              eps = await this.tencentSource.getEpisodes(cid);
+              provider = "tencent";
             }
             break;
           }
@@ -271,20 +254,8 @@ export default class DoubanSource extends BaseSource {
             const tvid = new URL(vendor.uri).searchParams.get("tvid");
             if (tvid) {
               log("info", `[Douban] Found iQIYI tvid: ${tvid}`);
-              // iQIYI source getEpisodes takes mediaId (which can be tvid or movie_tvid)
-              // The vendor URI usually contains the tvid for the *main* page.
-              // We need to check if it's a movie or series based on type, but vendor uri usually points to the main album.
-              // Let's assume series for episodeNumber > 1, or just try getEpisodes.
-
-              const eps = await this.iqiyiSource.getEpisodes(tvid);
-              // iQIYI eps have 'order' property
-              const targetEp =
-                eps.find((ep) => ep.order == episodeNumber) ||
-                eps[episodeNumber - 1];
-
-              if (targetEp) {
-                videoUrl = targetEp.link;
-              }
+              eps = await this.iqiyiSource.getEpisodes(tvid);
+              provider = "iqiyi";
             }
             break;
           }
@@ -292,20 +263,8 @@ export default class DoubanSource extends BaseSource {
             const showId = new URL(vendor.uri).searchParams.get("showid");
             if (showId) {
               log("info", `[Douban] Found Youku showId: ${showId}`);
-              const eps = await this.youkuSource.getEpisodes(showId);
-              // Youku eps logic in handleAnimes uses _processAndFormatEpisodes which adds episodeIndex
-              // getEpisodes returns raw videos.
-              // Assuming eps are sorted or we can find by title/index.
-              // Re-using _processAndFormatEpisodes logic implicitly by index or title matching might be hard without copying code.
-              // Let's just trust the index for now or simple title match.
-
-              // Try to match strict index first if available, otherwise array index
-              const targetEp = eps[episodeNumber - 1];
-              if (targetEp) {
-                videoUrl =
-                  targetEp.link ||
-                  `https://v.youku.com/v_show/id_${targetEp.id}.html`; // YoukuSource uses 'id' as vid
-              }
+              eps = await this.youkuSource.getEpisodes(showId);
+              provider = "youku";
             }
             break;
           }
@@ -313,26 +272,65 @@ export default class DoubanSource extends BaseSource {
             const seasonId = new URL(vendor.uri).pathname.split("/").pop();
             if (seasonId) {
               log("info", `[Douban] Found Bilibili seasonId: ${seasonId}`);
-              // seasonId usually ssXXXX
-              const eps = await this.bilibiliSource.getEpisodes(
-                `ss${seasonId}`
-              );
-              const targetEp = eps[episodeNumber - 1];
-              if (targetEp) {
-                videoUrl = targetEp.link;
-              }
+              eps = await this.bilibiliSource.getEpisodes(`ss${seasonId}`);
+              provider = "bilibili";
             }
             break;
           }
         }
 
-        if (videoUrl) {
-          log("info", `[Douban] Resolved video URL: ${videoUrl}`);
-          return videoUrl;
+        if (eps && eps.length > 0) {
+          log("info", `[Douban] Found ${eps.length} episodes from ${provider}`);
+
+          eps.forEach((ep, index) => {
+            // Normalize episode number
+            // Strategy:
+            // 1. Try to extract number from title (e.g., "第01集" -> 1).
+            // 2. Fallback to index + 1 if title parsing fails or is ambiguous.
+            // User requirement: "不应该包含0前缀，例如'第01集' 应该返回'1'"
+
+            let epNum = null;
+            if (ep.title) {
+              const match =
+                ep.title.match(/第(\d+)集/) || ep.title.match(/(\d+)/);
+              if (match) {
+                epNum = parseInt(match[1], 10).toString();
+              }
+            }
+
+            if (!epNum) {
+              epNum = (index + 1).toString();
+            }
+
+            // Store in map if not exists (first provider wins if multiple? or simplistic overwrite?)
+            // Assuming the first provider we find is good enough.
+            // But we iterate vendors. If we already found episodes, maybe we should stop?
+            // The original code iterated vendors and returned on first match.
+            // So if we have episodes from one vendor, we can break and return this map.
+
+            const url =
+              ep.link ||
+              (provider === "youku"
+                ? `https://v.youku.com/v_show/id_${ep.id}.html`
+                : null) ||
+              (provider === "tencent"
+                ? `https://v.qq.com/x/cover/${new URL(
+                    vendor.uri
+                  ).searchParams.get("cid")}/${ep.vid}.html`
+                : null);
+
+            if (url) {
+              episodeMap[epNum] = url;
+            }
+          });
+
+          // If we found episodes from this vendor, return the map.
+          // This mimics the behavior of returning the first found source.
+          return episodeMap;
         }
       }
 
-      log("info", `[Douban] No video URL found for episode ${episodeNumber}`);
+      log("info", `[Douban] No videos found for doubanId: ${doubanId}`);
       return null;
     } catch (error) {
       log("error", `[Douban] getDanmu error: ${error.message}`);

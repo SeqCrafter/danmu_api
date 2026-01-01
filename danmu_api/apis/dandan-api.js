@@ -1,7 +1,6 @@
 import { globals } from "../configs/globals.js";
 import { getPageTitle, jsonResponse } from "../utils/http-util.js";
 import { log } from "../utils/log-util.js";
-import { setRedisKey, updateRedisCaches } from "../utils/redis-util.js";
 import {
   setCommentCache,
   addAnime,
@@ -1027,17 +1026,16 @@ export async function getDoubanDanmu(url) {
   );
 
   let videoUrl;
-  const cacheKey = `douban:resolve:${doubanId}:${episode}`;
+  let episodeMap;
+  const cacheKey = `douban:episodes:${doubanId}`;
 
-  // 1. 尝试从 Redis 获取缓存
+  // 1. 尝试从 Redis 获取缓存 (Video Map)
   if (globals.redisValid) {
     try {
-      const cachedRes = await import("../utils/redis-util.js").then((m) =>
-        m.getRedisKey(cacheKey)
-      );
+      const cachedRes = await getRedisKey(cacheKey);
       if (cachedRes && cachedRes.result) {
-        videoUrl = JSON.parse(cachedRes.result);
-        log("info", `[Douban] Redis cache hit for ${cacheKey}: ${videoUrl}`);
+        episodeMap = JSON.parse(cachedRes.result);
+        log("info", `[Douban] Redis cache hit for episode map: ${doubanId}`);
       }
     } catch (e) {
       log("warn", `[Douban] Redis cache get failed: ${e.message}`);
@@ -1045,28 +1043,42 @@ export async function getDoubanDanmu(url) {
   }
 
   // 2. Redis无效或无缓存，尝试本地缓存
-  if (!videoUrl) {
-    videoUrl = getDoubanCache(cacheKey);
-    if (videoUrl) {
-      log("info", `[Douban] Local cache hit for ${cacheKey}: ${videoUrl}`);
+  if (!episodeMap) {
+    const cachedLocal = getDoubanCache(cacheKey);
+    if (cachedLocal) {
+      episodeMap = cachedLocal;
+      log("info", `[Douban] Local cache hit for episode map: ${doubanId}`);
     }
   }
 
-  // 3. 源站获取
-  if (!videoUrl) {
-    videoUrl = await doubanSource.getDanmu(doubanId, parseInt(episode));
+  // 3. 源站获取 (如果缓存中没有Map)
+  if (!episodeMap) {
+    episodeMap = await doubanSource.getDanmu(doubanId);
 
-    if (videoUrl) {
-      // 4. 更新缓存
+    // 4. 更新缓存
+    if (episodeMap) {
       // 4.1 更新本地缓存
-      setDoubanCache(cacheKey, videoUrl);
+      setDoubanCache(cacheKey, episodeMap);
 
       // 4.2 更新Redis缓存
       if (globals.redisValid) {
-        await import("../utils/redis-util.js").then((m) =>
-          m.setRedisKey(cacheKey, JSON.stringify(videoUrl))
-        );
+        await setRedisKey(cacheKey, JSON.stringify(episodeMap));
       }
+    }
+  }
+
+  // 5. 从Map中提取特定集数的URL
+  if (episodeMap) {
+    // Normalize episode request (remove leading zeros? user request says "1" is key)
+    const epKey = parseInt(episode, 10).toString();
+    videoUrl = episodeMap[epKey];
+    if (videoUrl) {
+      log(
+        "info",
+        `[Douban] Resolved video URL from map for episode ${epKey}: ${videoUrl}`
+      );
+    } else {
+      log("warn", `[Douban] Episode ${epKey} not found in map for ${doubanId}`);
     }
   }
 
