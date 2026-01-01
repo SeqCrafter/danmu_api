@@ -1,4 +1,4 @@
-import { Envs } from './envs.js';
+import { Envs } from "./envs.js";
 
 /**
  * 全局变量管理模块
@@ -13,7 +13,7 @@ export const Globals = {
   accessedEnvVars: {},
 
   // 静态常量
-  VERSION: '1.10.2',
+  VERSION: "1.10.2",
   MAX_LOGS: 500, // 日志存储，最多保存 500 行
   MAX_ANIMES: 100,
 
@@ -28,16 +28,19 @@ export const Globals = {
   redisValid: false, // redis是否生效
   redisCacheInitialized: false, // redis 缓存是否已初始化
   lastSelectMap: new Map(), // 存储查询关键字上次选择的animeId，用于下次match自动匹配时优先选择该anime
-  lastHashes: { // 存储上一次各变量哈希值
+  doubanCache: new Map(), // 豆瓣解析结果缓存，存储格式：{ doubanId_episode: videoUrl }
+  lastHashes: {
+    // 存储上一次各变量哈希值
     animes: null,
     episodeIds: null,
     episodeNum: null,
-    lastSelectMap: null
+    lastSelectMap: null,
+    doubanCache: null,
   },
   searchCache: new Map(), // 搜索结果缓存，存储格式：{ keyword: { results, timestamp } }
   commentCache: new Map(), // 弹幕缓存，存储格式：{ videoUrl: { comments, timestamp } }
-  deployPlatform: '', // 部署平台配置
-  currentToken: '', // 标识当前可用token
+  deployPlatform: "", // 部署平台配置
+  currentToken: "", // 标识当前可用token
 
   /**
    * 初始化全局变量，加载环境变量依赖
@@ -74,31 +77,34 @@ export const Globals = {
   getConfig() {
     // 使用 Proxy 保持接口兼容性
     const self = this;
-    return new Proxy({}, {
-      get(target, prop) {
-        // 优先返回 envs 中的属性（保持原有的平铺效果）
-        if (prop in self.envs) {
-          return self.envs[prop];
-        }
-        // 映射大写常量到小写
-        if (prop === 'version') return self.VERSION;
-        if (prop === 'maxLogs') return self.MAX_LOGS;
-        if (prop === 'maxAnimes') return self.MAX_ANIMES;
-        if (prop === 'maxLastSelectMap') return self.MAX_LAST_SELECT_MAP;
+    return new Proxy(
+      {},
+      {
+        get(target, prop) {
+          // 优先返回 envs 中的属性（保持原有的平铺效果）
+          if (prop in self.envs) {
+            return self.envs[prop];
+          }
+          // 映射大写常量到小写
+          if (prop === "version") return self.VERSION;
+          if (prop === "maxLogs") return self.MAX_LOGS;
+          if (prop === "maxAnimes") return self.MAX_ANIMES;
+          if (prop === "maxLastSelectMap") return self.MAX_LAST_SELECT_MAP;
 
-        // 其他属性直接返回
-        return self[prop];
-      },
-      set(target, prop, value) {
-        // 写操作同步到 Globals
-        if (prop in self.envs) {
-          self.envs[prop] = value;
-        } else {
-          self[prop] = value;
-        }
-        return true;
+          // 其他属性直接返回
+          return self[prop];
+        },
+        set(target, prop, value) {
+          // 写操作同步到 Globals
+          if (prop in self.envs) {
+            self.envs[prop] = value;
+          } else {
+            self[prop] = value;
+          }
+          return true;
+        },
       }
-    });
+    );
   },
 };
 
@@ -109,21 +115,24 @@ export const Globals = {
  *   import { globals } from './globals.js';
  *   console.log(globals.version);  // 直接访问，无需调用 getConfig()
  */
-export const globals = new Proxy({}, {
-  get(target, prop) {
-    return Globals.getConfig()[prop];
-  },
-  set(target, prop, value) {
-    Globals.getConfig()[prop] = value;
-    return true;
-  },
-  has(target, prop) {
-    return prop in Globals.getConfig();
-  },
-  ownKeys(target) {
-    return Reflect.ownKeys(Globals.getConfig());
-  },
-  getOwnPropertyDescriptor(target, prop) {
-    return Object.getOwnPropertyDescriptor(Globals.getConfig(), prop);
+export const globals = new Proxy(
+  {},
+  {
+    get(target, prop) {
+      return Globals.getConfig()[prop];
+    },
+    set(target, prop, value) {
+      Globals.getConfig()[prop] = value;
+      return true;
+    },
+    has(target, prop) {
+      return prop in Globals.getConfig();
+    },
+    ownKeys(target) {
+      return Reflect.ownKeys(Globals.getConfig());
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      return Object.getOwnPropertyDescriptor(Globals.getConfig(), prop);
+    },
   }
-});
+);

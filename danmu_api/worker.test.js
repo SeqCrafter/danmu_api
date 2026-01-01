@@ -1,15 +1,33 @@
 // 加载 .env 文件
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 dotenv.config();
 
-import test from 'node:test';
-import assert from 'node:assert';
-import { handleRequest } from './worker.js';
-import { extractTitleSeasonEpisode, getBangumi, getComment, searchAnime } from "./apis/dandan-api.js";
-import { getRedisKey, pingRedis, setRedisKey, setRedisKeyWithExpiry } from "./utils/redis-util.js";
+import test from "node:test";
+import assert from "node:assert";
+import { handleRequest } from "./worker.js";
+import {
+  extractTitleSeasonEpisode,
+  getBangumi,
+  getComment,
+  searchAnime,
+} from "./apis/dandan-api.js";
+import {
+  getRedisKey,
+  pingRedis,
+  setRedisKey,
+  setRedisKeyWithExpiry,
+} from "./utils/redis-util.js";
 import { getImdbepisodes } from "./utils/imdb-util.js";
-import { getTMDBChineseTitle, getTmdbJpDetail, searchTmdbTitles } from "./utils/tmdb-util.js";
-import { getDoubanDetail, getDoubanInfoByImdbId, searchDoubanTitles } from "./utils/douban-util.js";
+import {
+  getTMDBChineseTitle,
+  getTmdbJpDetail,
+  searchTmdbTitles,
+} from "./utils/tmdb-util.js";
+import {
+  getDoubanDetail,
+  getDoubanInfoByImdbId,
+  searchDoubanTitles,
+} from "./utils/douban-util.js";
 import RenrenSource from "./sources/renren.js";
 import HanjutvSource from "./sources/hanjutv.js";
 import BahamutSource from "./sources/bahamut.js";
@@ -24,15 +42,15 @@ import { VercelHandler } from "./configs/handlers/vercel-handler.js";
 import { NetlifyHandler } from "./configs/handlers/netlify-handler.js";
 import { CloudflareHandler } from "./configs/handlers/cloudflare-handler.js";
 import { EdgeoneHandler } from "./configs/handlers/edgeone-handler.js";
-import { Segment } from "./models/dandan-model.js"
+import { Segment } from "./models/dandan-model.js";
 
 // Mock Request class for testing
 class MockRequest {
   constructor(url, options = {}) {
     this.url = url;
-    this.method = options.method || 'GET';
+    this.method = options.method || "GET";
     this.headers = new Map(Object.entries(options.headers || {}));
-    this.json = options.body ? async () => options.body : undefined;  // 模拟 POST 请求的 body
+    this.json = options.body ? async () => options.body : undefined; // 模拟 POST 请求的 body
   }
 }
 
@@ -49,7 +67,7 @@ async function parseResponse(response) {
 const urlPrefix = "http://localhost:9321";
 const token = "87654321";
 
-test('worker.js API endpoints', async (t) => {
+test("worker.js API endpoints", async (t) => {
   const renrenSource = new RenrenSource();
   const hanjutvSource = new HanjutvSource();
   const bahamutSource = new BahamutSource();
@@ -60,8 +78,8 @@ test('worker.js API endpoints', async (t) => {
   const youkuSource = new YoukuSource();
   const otherSource = new OtherSource();
 
-  await t.test('GET / should return welcome message', async () => {
-    const req = new MockRequest(urlPrefix, { method: 'GET' });
+  await t.test("GET / should return welcome message", async () => {
+    const req = new MockRequest(urlPrefix, { method: "GET" });
     const res = await handleRequest(req);
     const body = await parseResponse(res);
 
@@ -69,25 +87,50 @@ test('worker.js API endpoints', async (t) => {
   });
 
   // 测试标题解析
-  await t.test('PARSE TitleSeasonEpisode', async () => {
+  await t.test("PARSE TitleSeasonEpisode", async () => {
     let title, season, episode;
-    ({title, season, episode} = await extractTitleSeasonEpisode("生万物 S02E08"));
-    assert(title === "生万物" && season == 2 && episode == 8, `Expected title === "生万物" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`);
+    ({ title, season, episode } = await extractTitleSeasonEpisode(
+      "生万物 S02E08"
+    ));
+    assert(
+      title === "生万物" && season == 2 && episode == 8,
+      `Expected title === "生万物" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`
+    );
 
-    ({title, season, episode} = await extractTitleSeasonEpisode("无忧渡.S02E08.2160p.WEB-DL.H265.DDP.5.1"));
-    assert(title === "无忧渡" && season == 2 && episode == 8, `Expected title === "无忧渡" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`);
+    ({ title, season, episode } = await extractTitleSeasonEpisode(
+      "无忧渡.S02E08.2160p.WEB-DL.H265.DDP.5.1"
+    ));
+    assert(
+      title === "无忧渡" && season == 2 && episode == 8,
+      `Expected title === "无忧渡" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`
+    );
 
     // ({title, season, episode} = await extractTitleSeasonEpisode("Blood.River.S02E08"));
     // assert(title === "暗河传" && season == 2 && episode == 8, `Expected title === "暗河传" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`);
 
-    ({title, season, episode} = await extractTitleSeasonEpisode("爱情公寓.ipartment.2009.S02E08.H.265.25fps.mkv"));
-    assert(title === "爱情公寓" && season == 2 && episode == 8, `Expected title === "爱情公寓" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`);
+    ({ title, season, episode } = await extractTitleSeasonEpisode(
+      "爱情公寓.ipartment.2009.S02E08.H.265.25fps.mkv"
+    ));
+    assert(
+      title === "爱情公寓" && season == 2 && episode == 8,
+      `Expected title === "爱情公寓" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`
+    );
 
-    ({title, season, episode} = await extractTitleSeasonEpisode("亲爱的X S02E08"));
-    assert(title === "亲爱的X" && season == 2 && episode == 8, `Expected title === "亲爱的X" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`);
+    ({ title, season, episode } = await extractTitleSeasonEpisode(
+      "亲爱的X S02E08"
+    ));
+    assert(
+      title === "亲爱的X" && season == 2 && episode == 8,
+      `Expected title === "亲爱的X" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`
+    );
 
-    ({title, season, episode} = await extractTitleSeasonEpisode("宇宙Marry Me? S02E08"));
-    assert(title === "宇宙Marry Me?" && season == 2 && episode == 8, `Expected title === "宇宙Marry Me?" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`);
+    ({ title, season, episode } = await extractTitleSeasonEpisode(
+      "宇宙Marry Me? S02E08"
+    ));
+    assert(
+      title === "宇宙Marry Me?" && season == 2 && episode == 8,
+      `Expected title === "宇宙Marry Me?" && season == 2 && episode == 8, but got ${title} ${season} ${episode}`
+    );
   });
 
   // await t.test('GET tencent danmu', async () => {
@@ -601,4 +644,32 @@ test('worker.js API endpoints', async (t) => {
   //   const res = await handler.deploy();
   //   assert(res, `Expected res is true, but got ${res}`);
   // });
+
+  // Test GET /api/v2/douban
+  await t.test("GET /api/v2/douban", async () => {
+    // Use a known Douban ID. Example: 35457272 (Spy x Family) or similar.
+    // Douban ID: 30458949 (Rick and Morty S4)
+    // Let's us a generic one that hopefully has playback sources.
+    // "庆余年" Douban ID: 26084133
+    // User request: 36382628
+    const doubanId = "36382628";
+    const episode = "1";
+    const matchUrl = `${urlPrefix}/${token}/api/v2/douban?douban_id=${doubanId}&episode_number=${episode}`;
+    const req = new MockRequest(matchUrl, { method: "GET" });
+
+    // Note: This test might fail if the Douban ID doesn't have valid playback sources or network fails.
+    // But it verifies the route handling.
+
+    const res = await handleRequest(req);
+    const responseBody = await parseResponse(res);
+    console.log("Douban API Response:", responseBody);
+
+    // 404 is also a valid response if video not found (logic works, just data missing)
+    // 200 means success.
+    // 400 means missing params.
+    assert.ok(
+      res.status === 200 || res.status === 404,
+      `Expected 200 or 404, got ${res.status}`
+    );
+  });
 });

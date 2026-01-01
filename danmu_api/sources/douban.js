@@ -1,4 +1,4 @@
-import BaseSource from './base.js';
+import BaseSource from "./base.js";
 import { log } from "../utils/log-util.js";
 import { getDoubanDetail, searchDoubanTitles } from "../utils/douban-util.js";
 
@@ -7,7 +7,7 @@ import { getDoubanDetail, searchDoubanTitles } from "../utils/douban-util.js";
 // =====================
 export default class DoubanSource extends BaseSource {
   constructor(tencentSource, iqiyiSource, youkuSource, bilibiliSource) {
-    super('BaseSource');
+    super("BaseSource");
     this.tencentSource = tencentSource;
     this.iqiyiSource = iqiyiSource;
     this.youkuSource = youkuSource;
@@ -53,110 +53,292 @@ export default class DoubanSource extends BaseSource {
       return [];
     }
 
-    const processDoubanAnimes = await Promise.allSettled(sourceAnimes.map(async (anime) => {
-      try {
-        if (anime?.layout !== "subject") return;
-        const doubanId = anime.target_id;
-        let animeType = anime?.type_name;
-        if (animeType !== "电影" && animeType !== "电视剧") return;
-        log("info", "doubanId: ", doubanId, anime?.target?.title, animeType);
+    const processDoubanAnimes = await Promise.allSettled(
+      sourceAnimes.map(async (anime) => {
+        try {
+          if (anime?.layout !== "subject") return;
+          const doubanId = anime.target_id;
+          let animeType = anime?.type_name;
+          if (animeType !== "电影" && animeType !== "电视剧") return;
+          log("info", "doubanId: ", doubanId, anime?.target?.title, animeType);
 
-        // 获取平台详情页面url
-        const response = await getDoubanDetail(doubanId);
+          // 获取平台详情页面url
+          const response = await getDoubanDetail(doubanId);
 
-        const results = [];
+          const results = [];
 
-        for (const vendor of response.data?.vendors ?? []) {
-          if (!vendor) {
-            continue;
+          for (const vendor of response.data?.vendors ?? []) {
+            if (!vendor) {
+              continue;
+            }
+            log("info", "vendor uri: ", vendor.uri);
+
+            if (response.data?.genres.includes("真人秀")) {
+              animeType = "综艺";
+            } else if (response.data?.genres.includes("纪录片")) {
+              animeType = "纪录片";
+            } else if (
+              animeType === "电视剧" &&
+              response.data?.genres.includes("动画") &&
+              response.data?.countries.some((country) =>
+                country.includes("中国")
+              )
+            ) {
+              animeType = "国漫";
+            } else if (
+              animeType === "电视剧" &&
+              response.data?.genres.includes("动画") &&
+              response.data?.countries.includes("日本")
+            ) {
+              animeType = "日番";
+            } else if (
+              animeType === "电视剧" &&
+              response.data?.genres.includes("动画")
+            ) {
+              animeType = "动漫";
+            } else if (
+              animeType === "电影" &&
+              response.data?.genres.includes("动画")
+            ) {
+              animeType = "动画电影";
+            } else if (
+              animeType === "电影" &&
+              response.data?.countries.some((country) =>
+                country.includes("中国")
+              )
+            ) {
+              animeType = "华语电影";
+            } else if (animeType === "电影") {
+              animeType = "外语电影";
+            } else if (
+              animeType === "电视剧" &&
+              response.data?.countries.some((country) =>
+                country.includes("中国")
+              )
+            ) {
+              animeType = "国产剧";
+            } else if (
+              animeType === "电视剧" &&
+              response.data?.countries.some((country) =>
+                ["日本", "韩国"].includes(country)
+              )
+            ) {
+              animeType = "日韩剧";
+            } else if (
+              animeType === "电视剧" &&
+              response.data?.countries.some((country) =>
+                [
+                  "美国",
+                  "英国",
+                  "加拿大",
+                  "法国",
+                  "德国",
+                  "意大利",
+                  "西班牙",
+                  "澳大利亚",
+                ].includes(country)
+              )
+            ) {
+              animeType = "欧美剧";
+            }
+
+            const tmpAnimes = [
+              {
+                title: response.data?.title,
+                year: response.data?.year,
+                type: animeType,
+                imageUrl: anime?.target?.cover_url,
+              },
+            ];
+            switch (vendor.id) {
+              case "qq": {
+                const cid = new URL(vendor.uri).searchParams.get("cid");
+                if (cid) {
+                  tmpAnimes[0].provider = "tencent";
+                  tmpAnimes[0].mediaId = cid;
+                  await this.tencentSource.handleAnimes(
+                    tmpAnimes,
+                    response.data?.title,
+                    doubanAnimes
+                  );
+                }
+                break;
+              }
+              case "iqiyi": {
+                const tvid = new URL(vendor.uri).searchParams.get("tvid");
+                if (tvid) {
+                  tmpAnimes[0].provider = "iqiyi";
+                  tmpAnimes[0].mediaId =
+                    anime?.type_name === "电影" ? `movie_${tvid}` : tvid;
+                  await this.iqiyiSource.handleAnimes(
+                    tmpAnimes,
+                    response.data?.title,
+                    doubanAnimes
+                  );
+                }
+                break;
+              }
+              case "youku": {
+                const showId = new URL(vendor.uri).searchParams.get("showid");
+                if (showId) {
+                  tmpAnimes[0].provider = "youku";
+                  tmpAnimes[0].mediaId = showId;
+                  await this.youkuSource.handleAnimes(
+                    tmpAnimes,
+                    response.data?.title,
+                    doubanAnimes
+                  );
+                }
+                break;
+              }
+              case "bilibili": {
+                const seasonId = new URL(vendor.uri).pathname.split("/").pop();
+                if (seasonId) {
+                  tmpAnimes[0].provider = "bilibili";
+                  tmpAnimes[0].mediaId = `ss${seasonId}`;
+                  await this.bilibiliSource.handleAnimes(
+                    tmpAnimes,
+                    response.data?.title,
+                    doubanAnimes
+                  );
+                }
+                break;
+              }
+            }
           }
-          log("info", "vendor uri: ", vendor.uri);
-
-          if (response.data?.genres.includes('真人秀')) {
-            animeType = "综艺";
-          } else if (response.data?.genres.includes('纪录片')) {
-            animeType = "纪录片";
-          } else if (animeType === "电视剧" && response.data?.genres.includes('动画')
-              && response.data?.countries.some(country => country.includes('中国'))) {
-            animeType = "国漫";
-          } else if (animeType === "电视剧" && response.data?.genres.includes('动画')
-              && response.data?.countries.includes('日本')) {
-            animeType = "日番";
-          } else if (animeType === "电视剧" && response.data?.genres.includes('动画')) {
-            animeType = "动漫";
-          } else if (animeType === "电影" && response.data?.genres.includes('动画')) {
-            animeType = "动画电影";
-          } else if (animeType === "电影" && response.data?.countries.some(country => country.includes('中国'))) {
-            animeType = "华语电影";
-          } else if (animeType === "电影") {
-            animeType = "外语电影";
-          } else if (animeType === "电视剧" && response.data?.countries.some(country => country.includes('中国'))) {
-            animeType = "国产剧";
-          } else if (animeType === "电视剧" && response.data?.countries.some(country => ['日本', '韩国'].includes(country))) {
-            animeType = "日韩剧";
-          } else if (animeType === "电视剧" && response.data?.countries.some(country =>
-            ['美国', '英国', '加拿大', '法国', '德国', '意大利', '西班牙', '澳大利亚'].includes(country)
-          )) {
-            animeType = "欧美剧";
-          }
-
-          const tmpAnimes = [{
-            title: response.data?.title,
-            year: response.data?.year,
-            type: animeType,
-            imageUrl: anime?.target?.cover_url,
-          }];
-          switch (vendor.id) {
-            case "qq": {
-              const cid = new URL(vendor.uri).searchParams.get('cid');
-              if (cid) {
-                tmpAnimes[0].provider = "tencent";
-                tmpAnimes[0].mediaId = cid;
-                await this.tencentSource.handleAnimes(tmpAnimes, response.data?.title, doubanAnimes)
-              }
-              break;
-            }
-            case "iqiyi": {
-              const tvid = new URL(vendor.uri).searchParams.get('tvid');
-              if (tvid) {
-                tmpAnimes[0].provider = "iqiyi";
-                tmpAnimes[0].mediaId = anime?.type_name === '电影' ? `movie_${tvid}` : tvid;
-                await this.iqiyiSource.handleAnimes(tmpAnimes, response.data?.title, doubanAnimes)
-              }
-              break;
-            }
-            case "youku": {
-              const showId = new URL(vendor.uri).searchParams.get('showid');
-              if (showId) {
-                tmpAnimes[0].provider = "youku";
-                tmpAnimes[0].mediaId = showId;
-                await this.youkuSource.handleAnimes(tmpAnimes, response.data?.title, doubanAnimes)
-              }
-              break;
-            }
-            case "bilibili": {
-              const seasonId = new URL(vendor.uri).pathname.split('/').pop();
-              if (seasonId) {
-                tmpAnimes[0].provider = "bilibili";
-                tmpAnimes[0].mediaId = `ss${seasonId}`;
-                await this.bilibiliSource.handleAnimes(tmpAnimes, response.data?.title, doubanAnimes)
-              }
-              break;
-            }
-          }
+          return results;
+        } catch (error) {
+          log("error", `[Douban] Error processing anime: ${error.message}`);
+          return [];
         }
-        return results;
-      } catch (error) {
-        log("error", `[Douban] Error processing anime: ${error.message}`);
-        return [];
-      }
-    }));
+      })
+    );
 
     this.sortAndPushAnimesByYear(doubanAnimes, curAnimes);
     return processDoubanAnimes;
   }
 
   async getEpisodeDanmu(id) {}
+
+  async getDanmu(doubanId, episodeNumber) {
+    try {
+      log(
+        "info",
+        `[Douban] getDanmu for doubanId: ${doubanId}, episode: ${episodeNumber}`
+      );
+
+      // 获取平台详情页面url
+      const response = await getDoubanDetail(doubanId);
+      if (!response || !response.data) {
+        log("error", `[Douban] Failed to get detail for ${doubanId}`);
+        return null;
+      }
+
+      for (const vendor of response.data?.vendors ?? []) {
+        if (!vendor) continue;
+
+        let videoUrl = null;
+
+        // 根据不同平台获取对应的视频链接
+        switch (vendor.id) {
+          case "qq": {
+            const cid = new URL(vendor.uri).searchParams.get("cid");
+            if (cid) {
+              log("info", `[Douban] Found Tencent cid: ${cid}`);
+              const eps = await this.tencentSource.getEpisodes(cid);
+              const targetEp =
+                eps.find((ep) => {
+                  // 尝试匹配集数
+                  if (
+                    ep.title &&
+                    (ep.title === `第${episodeNumber}集` ||
+                      ep.title.includes(`第${episodeNumber}集`))
+                  )
+                    return true;
+                  // 尝试匹配顺序 (假设 eps 是按顺序排列的)
+                  // 腾讯源返回的 eps 直接就是列表，索引+1即为集数，或者 ep.title
+                  return false;
+                }) || eps[episodeNumber - 1]; // Fallback to index
+
+              if (targetEp) {
+                // 腾讯源构建URL逻辑: https://v.qq.com/x/cover/{cid}/{vid}.html
+                videoUrl = `https://v.qq.com/x/cover/${cid}/${targetEp.vid}.html`;
+              }
+            }
+            break;
+          }
+          case "iqiyi": {
+            const tvid = new URL(vendor.uri).searchParams.get("tvid");
+            if (tvid) {
+              log("info", `[Douban] Found iQIYI tvid: ${tvid}`);
+              // iQIYI source getEpisodes takes mediaId (which can be tvid or movie_tvid)
+              // The vendor URI usually contains the tvid for the *main* page.
+              // We need to check if it's a movie or series based on type, but vendor uri usually points to the main album.
+              // Let's assume series for episodeNumber > 1, or just try getEpisodes.
+
+              const eps = await this.iqiyiSource.getEpisodes(tvid);
+              // iQIYI eps have 'order' property
+              const targetEp =
+                eps.find((ep) => ep.order == episodeNumber) ||
+                eps[episodeNumber - 1];
+
+              if (targetEp) {
+                videoUrl = targetEp.link;
+              }
+            }
+            break;
+          }
+          case "youku": {
+            const showId = new URL(vendor.uri).searchParams.get("showid");
+            if (showId) {
+              log("info", `[Douban] Found Youku showId: ${showId}`);
+              const eps = await this.youkuSource.getEpisodes(showId);
+              // Youku eps logic in handleAnimes uses _processAndFormatEpisodes which adds episodeIndex
+              // getEpisodes returns raw videos.
+              // Assuming eps are sorted or we can find by title/index.
+              // Re-using _processAndFormatEpisodes logic implicitly by index or title matching might be hard without copying code.
+              // Let's just trust the index for now or simple title match.
+
+              // Try to match strict index first if available, otherwise array index
+              const targetEp = eps[episodeNumber - 1];
+              if (targetEp) {
+                videoUrl =
+                  targetEp.link ||
+                  `https://v.youku.com/v_show/id_${targetEp.id}.html`; // YoukuSource uses 'id' as vid
+              }
+            }
+            break;
+          }
+          case "bilibili": {
+            const seasonId = new URL(vendor.uri).pathname.split("/").pop();
+            if (seasonId) {
+              log("info", `[Douban] Found Bilibili seasonId: ${seasonId}`);
+              // seasonId usually ssXXXX
+              const eps = await this.bilibiliSource.getEpisodes(
+                `ss${seasonId}`
+              );
+              const targetEp = eps[episodeNumber - 1];
+              if (targetEp) {
+                videoUrl = targetEp.link;
+              }
+            }
+            break;
+          }
+        }
+
+        if (videoUrl) {
+          log("info", `[Douban] Resolved video URL: ${videoUrl}`);
+          return videoUrl;
+        }
+      }
+
+      log("info", `[Douban] No video URL found for episode ${episodeNumber}`);
+      return null;
+    } catch (error) {
+      log("error", `[Douban] getDanmu error: ${error.message}`);
+      return null;
+    }
+  }
 
   formatComments(comments) {}
 }
