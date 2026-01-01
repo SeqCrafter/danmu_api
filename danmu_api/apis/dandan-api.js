@@ -1294,8 +1294,8 @@ export async function getCommentByUrl(videoUrl, queryFormat, segmentFlag) {
           errorCode: 400,
           success: false,
           errorMessage: "Missing or invalid url parameter",
-          count: 0,
-          comments: [],
+          danmu: 0,
+          danmuku: [],
         },
         400
       );
@@ -1311,8 +1311,8 @@ export async function getCommentByUrl(videoUrl, queryFormat, segmentFlag) {
           errorCode: 400,
           success: false,
           errorMessage: "Invalid url format, must start with http or https",
-          count: 0,
-          comments: [],
+          danmu: 0,
+          danmuku: [],
         },
         400
       );
