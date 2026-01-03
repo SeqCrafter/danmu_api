@@ -199,10 +199,6 @@ export async function searchAnime(
     if (globals.localCacheValid && curAnimes.length !== 0) {
       await updateLocalCaches();
     }
-    // 如果有新的anime获取到，则更新redis
-    if (globals.redisValid && curAnimes.length !== 0) {
-      await updateRedisCaches();
-    }
 
     return jsonResponse({
       errorCode: 0,
@@ -375,10 +371,6 @@ export async function searchAnime(
   // 如果有新的anime获取到，则更新本地缓存
   if (globals.localCacheValid && curAnimes.length !== 0) {
     await updateLocalCaches();
-  }
-  // 如果有新的anime获取到，则更新redis
-  if (globals.redisValid && curAnimes.length !== 0) {
-    await updateRedisCaches();
   }
 
   // 缓存搜索结果
@@ -809,7 +801,12 @@ export async function matchAnime(url, req) {
       const mappedTitle = globals.titleMappingTable.get(title);
       if (mappedTitle) {
         title = mappedTitle;
-        log("info", `Title mapped from original: ${url.searchParams.get("keyword")} to: ${title}`);
+        log(
+          "info",
+          `Title mapped from original: ${url.searchParams.get(
+            "keyword"
+          )} to: ${title}`
+        );
       }
     }
 
@@ -1038,41 +1035,20 @@ export async function getDoubanDanmu(url) {
   let episodeMap;
   const cacheKey = `douban:episodes:${doubanId}`;
 
-  // 1. 尝试从 Redis 获取缓存 (Video Map)
-  if (globals.redisValid) {
-    try {
-      const cachedRes = await getRedisKey(cacheKey);
-      if (cachedRes && cachedRes.result) {
-        episodeMap = JSON.parse(cachedRes.result);
-        log("info", `[Douban] Redis cache hit for episode map: ${doubanId}`);
-      }
-    } catch (e) {
-      log("warn", `[Douban] Redis cache get failed: ${e.message}`);
-    }
+  // 尝试从本地缓存获取
+  const cachedLocal = getDoubanCache(cacheKey);
+  if (cachedLocal) {
+    episodeMap = cachedLocal;
+    log("info", `[Douban] Local cache hit for episode map: ${doubanId}`);
   }
 
-  // 2. Redis无效或无缓存，尝试本地缓存
-  if (!episodeMap) {
-    const cachedLocal = getDoubanCache(cacheKey);
-    if (cachedLocal) {
-      episodeMap = cachedLocal;
-      log("info", `[Douban] Local cache hit for episode map: ${doubanId}`);
-    }
-  }
-
-  // 3. 源站获取 (如果缓存中没有Map)
+  // 源站获取 (如果缓存中没有Map)
   if (!episodeMap) {
     episodeMap = await doubanSource.getDanmu(doubanId);
 
-    // 4. 更新缓存
+    // 更新本地缓存
     if (episodeMap) {
-      // 4.1 更新本地缓存
       setDoubanCache(cacheKey, episodeMap);
-
-      // 4.2 更新Redis缓存
-      if (globals.redisValid) {
-        await setRedisKey(cacheKey, JSON.stringify(episodeMap));
-      }
     }
   }
 
@@ -1290,9 +1266,6 @@ export async function getComment(path, queryFormat, segmentFlag) {
       "lastSelectMap",
       JSON.stringify(Object.fromEntries(globals.lastSelectMap))
     );
-  }
-  if (globals.redisValid && animeId) {
-    await setRedisKey("lastSelectMap", globals.lastSelectMap);
   }
 
   // 缓存弹幕结果
