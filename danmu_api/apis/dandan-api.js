@@ -1452,7 +1452,7 @@ export async function getSegmentComment(segment, queryFormat) {
 // Extracted function for GET /api/v2/douban
 export async function getAnimeByDouban(url) {
   const doubanId = url.searchParams.get("douban_id");
-  const episode = url.searchParams.get("episode") || "";
+  const episode = url.searchParams.get("episode_number") || "";
   const queryFormat = url.searchParams.get("format");
   const segmentFlag = url.searchParams.get("segmentflag");
 
