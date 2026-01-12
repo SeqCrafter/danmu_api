@@ -1,6 +1,6 @@
-import {globals} from "../configs/globals.js";
-import {log} from "./log-util.js";
-import {jsonResponse, xmlResponse} from "./http-util.js";
+import { globals } from "../configs/globals.js";
+import { log } from "./log-util.js";
+import { jsonResponse, xmlResponse } from "./http-util.js";
 
 // =====================
 // danmu处理相关函数
@@ -29,7 +29,7 @@ export function groupDanmusByMinute(filteredDanmus, n) {
     }
 
     // 添加到对应分组
-    acc[group].push({...danmu, t: time});
+    acc[group].push({ ...danmu, t: time });
     return acc;
   }, {});
 
@@ -115,7 +115,7 @@ export function convertToDanmakuJson(contents, platform) {
     );
   } else if (contents && Array.isArray(contents.danmuku)) {
     // 处理 danmuku 数组，映射为对象格式
-    const typeMap = {right: 1, top: 4, bottom: 5};
+    const typeMap = { right: 1, top: 4, bottom: 5 };
     const hexToDecimal = (hex) =>
       hex ? parseInt(hex.replace("#", ""), 16) : 16777215;
     items = contents.danmuku.map((item) => ({
@@ -180,7 +180,7 @@ export function convertToDanmakuJson(contents, platform) {
 
     attributes = [time, mode, color, `[${platform}]`].join(",");
 
-    danmus.push({p: attributes, m, cid: cidCounter++});
+    danmus.push({ p: attributes, m, cid: cidCounter++ });
   }
 
   // 切割字符串成正则表达式数组
@@ -231,7 +231,7 @@ export function convertToDanmakuJson(contents, platform) {
     let topBottomCount = 0;
     let colorCount = 0;
 
-    convertedDanmus = groupedDanmus.map((danmu) => {
+    convertedDanmus = convertedDanmus.map((danmu) => {
       const pValues = danmu.p.split(",");
       if (pValues.length < 3) return danmu;
 
@@ -272,7 +272,7 @@ export function convertToDanmakuJson(contents, platform) {
 
       if (modified) {
         const newP = [pValues[0], mode, color, ...pValues.slice(3)].join(",");
-        return {...danmu, p: newP};
+        return { ...danmu, p: newP };
       }
       return danmu;
     });
