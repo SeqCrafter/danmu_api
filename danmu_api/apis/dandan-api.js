@@ -59,7 +59,7 @@ import {
   Episodes,
   Bangumi,
 } from "../models/dandan-model.js";
-
+import { getDoubanDetail } from "../utils/douban-util.js";
 // =====================
 // 兼容弹弹play接口
 // =====================
