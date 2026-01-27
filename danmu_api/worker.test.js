@@ -20,6 +20,7 @@ import BilibiliSource from "./sources/bilibili.js";
 import YoukuSource from "./sources/youku.js";
 import SohuSource from "./sources/sohu.js";
 import LeshiSource from "./sources/leshi.js";
+import XiguaSource from "./sources/xigua.js";
 import AnimekoSource from "./sources/animeko.js";
 import OtherSource from "./sources/other.js";
 import { NodeHandler } from "./configs/handlers/node-handler.js";
@@ -63,6 +64,7 @@ test('worker.js API endpoints', async (t) => {
   const youkuSource = new YoukuSource();
   const sohuSource = new SohuSource();
   const leshiSource = new LeshiSource();
+  const xiguaSource = new XiguaSource();
   const animekoSource = new AnimekoSource();
   const otherSource = new OtherSource();
 
@@ -250,6 +252,28 @@ test('worker.js API endpoints', async (t) => {
   //     url: 'https://hd-my.le.com/danmu/list?vid=1578861&start=1800&end=2100&callback=vjs_1768494351290',
   //   });
   //   const res = await leshiSource.getSegmentComments(segment);
+  //   assert(res.length >= 0, `Expected res.length >= 0, but got ${res.length}`);
+  // });
+
+  // await t.test('GET xigua danmu', async () => {
+  //   const res = await xiguaSource.getComments("https://m.ixigua.com/video/6551333775337325060", "xigua");
+  //   assert(res.length > 2, `Expected res.length > 2, but got ${res.length}`);
+  // });
+
+  // await t.test('GET xigua danmu segments', async () => {
+  //   const res = await xiguaSource.getComments("https://m.ixigua.com/video/6551333775341519368", "xigua", true);
+  //   assert(res.type === "xigua", `Expected res.type === "xigua", but got ${res.type === "xigua"}`);
+  //   assert(res.segmentList.length >= 0, `Expected res.segmentList.length >= 0, but got ${res.segmentList.length}`);
+  // });
+
+  // await t.test('GET xigua segment danmu', async () => {
+  //   const segment = Segment.fromJson({
+  //     type: 'xigua',
+  //     segment_start: 64000,
+  //     segment_end: 96000,
+  //     url: '7129807005509815588'
+  //   });
+  //   const res = await xiguaSource.getSegmentComments(segment);
   //   assert(res.length >= 0, `Expected res.length >= 0, but got ${res.length}`);
   // });
 
