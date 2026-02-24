@@ -50,7 +50,7 @@ LogVar 弹幕 API 服务器
 
 - **API 接口**：
   - `GET /api/v2/search/anime?keyword=${queryTitle}`：根据关键字搜索动漫。
-  - `POST /api/v2/match`：根据关键字匹配动漫，用于自动匹配。（已支持在match接口中通过@语法动态指定平台优先级，如`赴山海 S01E28 @qiyi`；已支持从网盘资源命名，如`无忧渡.S01E01.2160p.WEB-DL.H265.DDP.5.1`中提取 title/season/episode）；已支持外语标题匹配，如`Blood.River.S01E05`，需配置环境变量`TITLE_TO_CHINESE`使用；已适配该格式`爱情公寓.ipartment.2009.S03E05.H.265.25fps.mkv`标题
+  - `POST /api/v2/match`：根据关键字匹配动漫，用于自动匹配。（已支持在match接口中通过@语法动态指定平台优先级，如`赴山海 S01E28 @qiyi`；已支持从网盘资源命名，如`无忧渡.S01E01.2160p.WEB-DL.H265.DDP.5.1`中提取 title/season/episode）；已支持外语标题匹配，如`Blood.River.S01E05`，需配置环境变量`TITLE_TO_CHINESE`使用；已适配该格式`爱情公寓.ipartment.2009.S03E05.H.265.25fps.mkv`标题；已支持AI自动匹配，需配合AI相关环境变量使用
   - `GET /api/v2/search/episodes`：根据关键词搜索所有匹配的剧集信息。
   - `GET /api/v2/bangumi/:animeId`：获取指定动漫的详细信息。
   - `GET /api/v2/comment/:commentId?format=json`：获取指定弹幕评论，支持返回相关评论和字符转换。
@@ -399,6 +399,7 @@ API 支持返回 Bilibili 标准 XML 格式的弹幕数据，通过查询参数 
 > 有很多人问FW能不能用，FW推荐直接使用插件，如果非要使用，则可以配合 `https://raw.githubusercontent.com/huangxd-/ForwardWidgets/refs/heads/main/widgets.fwd` 里的`danmu_api`插件使用
 
 ## 环境变量列表
+<<<<<<< HEAD
 
 | 变量名称                     | 描述                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -442,6 +443,54 @@ API 支持返回 Bilibili 标准 XML 格式的弹幕数据，通过查询参数 
 | DEPLOY_PLATFROM_PROJECT      | 【可选】部署项目名称，调用部署服务API需要，配置后可使用UI界面配置服务，不同部署平台获取方式可查看 [部署平台环境变量配置指南](https://github.com/huangxd-/danmu_api/tree/main/danmu_api/ui/README.md#部署平台环境变量配置指南) ，docker部署和本地node部署并不需要配置                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | DEPLOY_PLATFROM_TOKEN        | 【可选】部署平台token，调用部署服务API需要，配置后可使用UI界面配置服务，不同部署平台获取方式可查看 [部署平台环境变量配置指南](https://github.com/huangxd-/danmu_api/tree/main/danmu_api/ui/README.md#部署平台环境变量配置指南) ，docker部署和本地node部署并不需要配置                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | NODE_TLS_REJECT_UNAUTHORIZED | 【可选】在建立 HTTPS 连接时是否验证服务器的 SSL/TLS 证书，0表示忽略，默认为1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+=======
+| 变量名称      | 描述 |
+| ----------- | ----------- |
+| TOKEN      | 【可选】自定义用户token，不填默认为`87654321`       |
+| ADMIN_TOKEN      | 【可选】系统管理访问令牌，如果未配置此值，则无法访问系统管理功能，需要先配置后在URL中填入此token才能打开系统管理       |
+| OTHER_SERVER   | 【可选】兜底第三方弹幕服务器，不填默认为`https://api.danmu.icu`，其他可选：`https://fc.lyz05.cn`，`https://dmku.hls.one`，`https://se.678.ooo`，`https://danmu.56uxi.com`，`https://dm.lxlad.com`       |
+| CUSTOM_SOURCE_API_URL   | 【可选】自定义弹幕源API地址，默认为空，配置后还需在SOURCE_ORDER添加custom源       |
+| VOD_SERVERS      | 【可选】VOD服务器列表，支持多个服务器并发查询，格式：`名称@URL,名称@URL,...`，示例：`金蝉@https://zy.jinchancaiji.com,789@https://www.caiji.cyou,听风@https://gctf.tfdh.top`，不填默认为`金蝉@https://zy.jinchancaiji.com,789@https://www.caiji.cyou,听风@https://gctf.tfdh.top`       |
+| VOD_RETURN_MODE      | 【可选】VOD返回模式，可选值：`all`（返回所有站点结果）、`fastest`（只返回最快的站点结果），默认为`fastest`。当配置多个VOD站点时，`all`模式会返回所有站点的结果（结果较多），`fastest`模式只返回首先响应成功的站点结果（结果较少，避免重复）       |
+| VOD_REQUEST_TIMEOUT      | 【可选】VOD服务器单个请求超时时间（毫秒），防止慢速或失效的采集站阻塞搜索，默认为`10000`（10秒），建议值：`5000-15000`。由于`fastest`模式只返回最快响应的站点，可以设置较大的超时时间给慢速站点更多机会       |
+| BILIBILI_COOKIE      | 【可选】b站cookie（填入后能抓取完整弹幕和启用港澳台App接口），如 `buvid3=E2BCA ... eao6; theme-avatar-tip-show=SHOWED`，请自行通过浏览器或抓包工具抓取，热心网友测试后，弹幕获取实际最少只需取 `SESSDATA=xxxx` 字段，但如果需要使用港澳台区域稳定的App搜索接口还需要`bili_jct=xxxx`或`access_key=xxxx` 字段，不知道怎么获取cookie的，可以从工具 [cookie-butler](https://cookie-butler.do-u.me) 获取    |
+| YOUKU_CONCURRENCY    | 【可选】youku弹幕请求并发数，用于加快youku弹幕请求速度，不填默认为`8`，最高`16`       |
+| SOURCE_ORDER    | 【可选】源排序，用于按源对返回资源的排序（注意：先后顺序会影响自动匹配最终的返回），默认是`360,vod,renren,hanjutv`，表示360数据排在最前，hanjutv数据排在最后，示例：`360,renren`：只返回360数据和renren数据，且360数据靠前；当前可选择的源字段有 `360,vod,tmdb,douban,tencent,youku,iqiyi,imgo,bilibili,migu,sohu,leshi,xigua,maiduidui,renren,hanjutv,bahamut,dandan,animeko,custom`       |
+| PLATFORM_ORDER    | 【可选】自动匹配优选平台，按顺序优先返回指定平台弹幕，默认为空，即返回第一个满足条件的平台，示例：`bilibili1,qq`，表示如果有b站的播放源，则优先返回b站的弹幕，否则就返回腾讯的弹幕，两者都没有，则返回第一个满足条件的平台，当配置合并平台的时候为指定期望的合并源；当前可选择的平台字段有 `qiyi, bilibili1, imgo, youku, qq, migu, sohu, leshi, xigua, maiduidui, renren, hanjutv, bahamut, dandan, animeko, custom`  |
+| MERGE_SOURCE_PAIRS    | 【可选】源合并配置，配置后将对应源合并同时一起获取弹幕返回，默认为空，格式是`源字段&源字段&源字段`，示例：`imgo&iqiyi,dandan&bahamut&animeko,imgo`， 允许多组、允许同时存在、允许多源，允许填单源表示保留原结果，一组中第一个为主源其余为副源，副源往主源合并，主源如果没有结果会轮替下一个作为主源循环，目前允许合并的源字段有`tencent,youku,iqiyi,imgo,bilibili,migu,sohu,leshi,xigua,maiduidui,renren,hanjutv,bahamut,dandan,animeko` |
+| ANIME_TITLE_FILTER    | 【可选】剧名过滤规则，用于按正则表达式对剧名进行过滤，适用于过滤一些不需要的剧集，需开启ENABLE_ANIME_EPISODE_FILTER，默认值：空（不过滤），格式：使用 \| 分隔多个关键词，例如：广告\|预告\|无关剧名       |
+| EPISODE_TITLE_FILTER    | 【可选】剧集标题正则过滤，按正则关键字对剧集或综艺的集标题进行过滤，适用于过滤一些预告或综艺非正式集，只支持match自动匹配，默认值如下 |
+| ENABLE_ANIME_EPISODE_FILTER    | 【可选】控制手动搜索的时候是否根据ANIME_TITLE_FILTER进行剧名过滤以及根据EPISODE_TITLE_FILTER进行集标题过滤，默认为`false`（禁用），启用后 GET /api/v2/bangumi/{id} 和 GET /api/v2/search/anime 接口会过滤掉预告、花絮等特殊集，以及名称包含特殊关键词的动漫。       |
+| STRICT_TITLE_MATCH    | 【可选】是否启用严格标题匹配模式，默认为`false`（宽松模糊匹配），启用后只匹配标题开头或完全匹配的结果。例如：搜索"遮天"时，`false`会匹配"古惑仔3之只手遮天"，`true`只匹配"遮天"、"遮天 第一季"等。可选值：`true`、`false`       |
+| TITLE_TO_CHINESE    | 【可选】是否在match自动匹配时将外语标题转换成中文标题，适用于网盘没有刮削的资源，默认值：false（不转换），说明：需配合TMDB_API_KEY使用       |
+| TITLE_MAPPING_TABLE    | 【可选】剧名映射表，用于自动匹配时替换标题进行搜索，格式：原始标题->映射标题;原始标题->映射标题;... ，例如："唐朝诡事录->唐朝诡事录之西行;国色芳华->锦绣芳华"       |
+| ANIME_TITLE_SIMPLIFIED    | 【可选】是否在搜索时将繁体剧名标题自动转换为简体，适用于繁体标题搜索，默认值：false（不转换），可选值：`true`、`false`       |
+| BLOCKED_WORDS    | 【可选】弹幕屏蔽词列表，默认为空，示例如下       |
+| GROUP_MINUTE    | 【可选】合并去重分钟数，表示按n分钟分组后对弹幕合并去重，默认为1，最大值为30，0表示不去重       |
+| DANMU_LIMIT    | 【可选】等间隔采样限制弹幕总数，单位为k，即千：默认 0，表示不限制弹幕数，若改为5，弹幕总数在超过5000的情况下会将弹幕数控制在5000       |
+| CONVERT_TOP_BOTTOM_TO_SCROLL    | 【可选】是否将顶部和底部弹幕转换为浮动弹幕，默认为`false`（不转换），启用后顶部弹幕（ct=5）和底部弹幕（ct=4）会被转换为浮动弹幕（ct=1），可选值：`true`、`false`       |
+| CONVERT_COLOR    | 【可选】弹幕转换颜色配置，默认为`default`（不转换），`white` 将所有非白色的弹幕颜色转换为纯白色，`color` 将所有白色弹幕转换为随机颜色（包含白色），可选值：`default`、`white`、`color`       |
+| DANMU_OUTPUT_FORMAT    | 【可选】弹幕输出格式，默认为`json`，可选值：`json`（JSON格式）、`xml`（XML格式），支持通过查询参数`?format=xml`或`?format=json`覆盖此设置，优先级：查询参数 > 环境变量 > 默认值       |
+| DANMU_SIMPLIFIED_TRADITIONAL    | 【可选】弹幕简繁体转换设置：default（默认不转换）、simplified（繁转简）、traditional（简转繁）       |
+| PROXY_URL    | 【可选】代理/反代地址，目前只对巴哈姆特、TMDB API、bilibili生效，支持格式：<br> 正常代理：`http://127.0.0.1:7890` <br> 万能反代：`@http://127.0.0.1` <br> 特定反代：`源字段@http://127.0.0.1`，目前支持的字段有：`bahamut,tmdb,bilibili`（bilibili字段会启用阿b的港澳台番剧的搜索与获取）<br> 混合配置/示例：`http://你的代理地址:28233,bahamut@你的巴哈反代地址,tmdb@你的tmdb反代地址,@你的万能反代地址` <br> 优先级：特定反代 > 万能反代 > 正常代理，高优先级覆盖低优先级使用。 <br> （注意：如果巴哈姆特请求不通，会拖慢搜索返回速度，如需使用bahamut源请在SOURCE_ORDER环境变量中手动添加`bahamut`）如果你使用docker部署并且访问不了bahamut源，请配置代理地址或者反代（[Netlify反代教程](https://github.com/wan0ge/bahamut-api-proxy)）；vercel/netlify/cf中理应都自然能联通，不用填写       |
+| TMDB_API_KEY    | 【可选】TMDB API Key地址，目前只对巴哈姆特生效，配置后并行从TMDB获取日语原名搜索巴哈（如果TMDB条目类型不是动画或制作地区不是jp则不会进行巴哈搜索）可以解决巴哈译名不同导致的搜索无结果问题，例如大陆常用译名`间谍过家家`在巴哈译名为`間諜家家酒`，正常搜索无法搜索到，配置后可以解决这一问题但会稍微影响请求速度，[TMDBAPI](https://www.themoviedb.org/settings/api)获取方法参考：[TMDB API Key申请 - 绿联NAS私有云](https://www.ugnas.com/tutorial-detail/id-226.html)       |
+| RATE_LIMIT_MAX_REQUESTS    | 【可选】限流配置：1分钟内同一IP最大请求次数，默认为`3`，设置为`0`表示不限流       |
+| LOG_LEVEL    | 【可选】日志级别，默认为`info`，可选值：`error`（仅错误）、`warn`（错误和警告）、`info`（所有日志），生产环境建议使用`warn`，调试时使用`info`       |
+| SEARCH_CACHE_MINUTES    | 【可选】搜索结果缓存时间（分钟），默认为`1`，避免短期内重复的不必要API请求，同时保证获取最新的结果列表，可根据需要调整：Vercel/Cloudflare建议`1-5`分钟，Docker可设置`5-30`分钟，设置为`0`表示不缓存       |
+| COMMENT_CACHE_MINUTES    | 【可选】弹幕缓存时间（分钟），默认为`1`，弹幕数据的缓存时间，独立于搜索结果缓存       |
+| REMEMBER_LAST_SELECT    | 【可选】是否记住手动选择结果，用于match自动匹配时优选上次的选择，默认为`true`，表示记住，请注意，该功能为实验性功能，会记住某个剧上次选择的结果作为下次自动匹配的优选，如不需要，请关闭       |
+| MAX_LAST_SELECT_MAP    | 【可选】最后选择映射缓存大小限制，默认为`100`，lastSelectMap最多保存的条目数，超过限制时删除最早的条目（FIFO），用于存储查询关键字上次选择的animeId       |
+| UPSTASH_REDIS_REST_URL    | 【可选】Upstash redis url，需配合UPSTASH_REDIS_REST_TOKEN使用，用于持久化存储，不会因为冷启动而丢失过去的查询信息（在cf/eo/claw上配置后应该能更稳定点，也能解决小幻掉匹配的问题，但会稍微影响请求速度），获取方法请参考：`https://cloud.tencent.cn/developer/article/2424508`       |
+| UPSTASH_REDIS_REST_TOKEN    | 【可选】Upstash redis token，需配合UPSTASH_REDIS_REST_URL使用，用于持久化存储，不会因为冷启动而丢失过去的查询信息（在cf/eo/claw上配置后应该能更稳定点，也能解决小幻掉匹配的问题，但会稍微影响请求速度），获取方法请参考：`https://cloud.tencent.cn/developer/article/2424508`       |
+| DEPLOY_PLATFROM_ACCOUNT    | 【可选】部署账号ID，调用部署服务API需要，配置后可使用UI界面配置服务，不同部署平台获取方式可查看 [部署平台环境变量配置指南](https://github.com/huangxd-/danmu_api/tree/main/danmu_api/ui/README.md#部署平台环境变量配置指南) ，docker部署和本地node部署并不需要配置      |
+| DEPLOY_PLATFROM_PROJECT    | 【可选】部署项目名称，调用部署服务API需要，配置后可使用UI界面配置服务，不同部署平台获取方式可查看 [部署平台环境变量配置指南](https://github.com/huangxd-/danmu_api/tree/main/danmu_api/ui/README.md#部署平台环境变量配置指南) ，docker部署和本地node部署并不需要配置       |
+| DEPLOY_PLATFROM_TOKEN    | 【可选】部署平台token，调用部署服务API需要，配置后可使用UI界面配置服务，不同部署平台获取方式可查看 [部署平台环境变量配置指南](https://github.com/huangxd-/danmu_api/tree/main/danmu_api/ui/README.md#部署平台环境变量配置指南) ，docker部署和本地node部署并不需要配置       |
+| NODE_TLS_REJECT_UNAUTHORIZED      | 【可选】在建立 HTTPS 连接时是否验证服务器的 SSL/TLS 证书，0表示忽略，默认为1       |
+| AI_BASE_URL      | 【可选】AI服务的基础URL地址，用于配置AI相关功能的API端点，不填默认为https://api.openai.com/v1       |
+| AI_MODEL      | 【可选】AI模型名称，指定使用的AI模型，不填默认为gpt-4o       |
+| AI_API_KEY      | 【可选】AI服务的API密钥，用于身份验证，默认为空，需手动填写       |
+| AI_MATCH_PROMPT      | 【可选】AI匹配提示词，用于自定义AI匹配行为，不填提供默认提示词，提示词如下       |
+>>>>>>> upstream/main
 
 ```regex
 # EPISODE_TITLE_FILTER 默认值
@@ -453,7 +502,7 @@ API 支持返回 Bilibili 标准 XML 格式的弹幕数据，通过查询参数 
 
 ```regex
 # BLOCKED_WORDS 示例值
-/.{20,}/,/^\d{2,4}[-/.]\d{1,2}[-/.]\d{1,2}([日号.]*)?$/,/^(?!哈+$)([a-zA-Z\u4e00-\u9fa5])\1{2,}/,/[0-9]+\.*[0-9]*\s*(w|万)+\s*(\+|个|人|在看)+/,/^[a-z]{6,}$/,/^(?:qwertyuiop|asdfghjkl|zxcvbnm)$/,/^\d{5,}$/,/^(\d)\1{2,}$/,/\d{1,4}/,/(20[0-3][0-9])/,/(0?[1-9]|1[0-2])月/,/\d{1,2}[.-]\d{1,2}/,/[@#&$%^*+\|/\-_=<>°◆◇■□●○★☆▼▲♥♦♠♣①②③④⑤⑥⑦⑧⑨⑩]/,/[一二三四五六七八九十百\d]+刷/,/第[一二三四五六七八九十百\d]+/,/(全体成员|报到|报道|来啦|签到|刷|打卡|我在|来了|考古|爱了|挖坟|留念|你好|回来|哦哦|重温|复习|重刷|再看|在看|前排|沙发|有人看|板凳|末排|我老婆|我老公|撅了|后排|周目|重看|包养|DVD|同上|同样|我也是|俺也|算我|爱豆|我家爱豆|我家哥哥|加我|三连|币|新人|入坑|补剧|冲了|硬了|看完|舔屏|万人|牛逼|煞笔|傻逼|卧槽|tm|啊这|哇哦)/
+/.{20,}/,/^\d{2,4}[-/.]\d{1,2}[-/.]\d{1,2}([日号.]*)?$/,/^(?!哈+$)([a-zA-Z\u4e00-\u9fa5])\1{2,}/,/[0-9]+\.*[0-9]*\s*(w|万)+\s*(\+|个|人|在看)+/,/^[a-z]{6,}$/,/^(?:qwertyuiop|asdfghjkl|zxcvbnm)$/,/^\d{5,}$/,/^(\d)\1{2,}$/,/^\d{1,4}$/,/(20[0-3][0-9])/,/(0?[1-9]|1[0-2])月/,/\d{1,2}[.-]\d{1,2}/,/[@#&$%^*+\|/\-_=<>°◆◇■□●○★☆▼▲♥♦♠♣①②③④⑤⑥⑦⑧⑨⑩]/,/[一二三四五六七八九十百\d]+刷/,/第[一二三四五六七八九十百\d]+/,/(全体成员|报到|报道|来啦|签到|刷|打卡|我在|来了|考古|爱了|挖坟|留念|你好|回来|哦哦|重温|复习|重刷|再看|在看|前排|沙发|有人看|板凳|末排|我老婆|我老公|撅了|后排|周目|重看|包养|DVD|同上|同样|我也是|俺也|算我|爱豆|我家爱豆|我家哥哥|加我|三连|币|新人|入坑|补剧|冲了|硬了|看完|舔屏|万人|牛逼|煞笔|傻逼|卧槽|tm|啊这|哇哦)/
 
 # 注释如下：
 /.{20,}/  # 屏蔽20字符及以上的弹幕
@@ -464,7 +513,7 @@ API 支持返回 Bilibili 标准 XML 格式的弹幕数据，通过查询参数 
 /^(?:qwertyuiop|asdfghjkl|zxcvbnm)$/  # 屏蔽键盘连续行的弹幕
 /^\d{5,}$/  # 屏蔽5位及以上纯数字的弹幕
 /^(\d)\1{2,}$/  # 屏蔽三个及以上相同数字重复的弹幕
-/\d{1,4}/  # 屏蔽1-4位数字的弹幕
+/^\d{1,4}$/  # 屏蔽1-4位数字的弹幕
 /(20[0-3][0-9])/  # 屏蔽2000-2039年份相关的弹幕
 /(0?[1-9]|1[0-2])月/  # 屏蔽月份表述的弹幕
 /\d{1,2}[.-]\d{1,2}/  # 屏蔽类似时间或日期分隔的数字弹幕
@@ -474,7 +523,48 @@ API 支持返回 Bilibili 标准 XML 格式的弹幕数据，通过查询参数 
 /(全体成员|报到|报道|来啦|签到|刷|打卡|我在|来了|考古|爱了|挖坟|留念|你好|回来|哦哦|重温|复习|重刷|再看|在看|前排|沙发|有人看|板凳|末排|我老婆|我老公|撅了|后排|周目|重看|包养|DVD|同上|同样|我也是|俺也|算我|爱豆|我家爱豆|我家哥哥|加我|三连|币|新人|入坑|补剧|冲了|硬了|看完|舔屏|万人|牛逼|煞笔|傻逼|卧槽|tm|啊这|哇哦)/  # 屏蔽常见互动、报到或口语化弹幕词汇
 ```
 
+```shell
+# AI_MATCH_PROMPT 默认值
+你是一个专业的影视匹配专家，你的的任务是根据用户提供的 JSON 数据，从候选动漫列表中匹配最符合条件的动漫及集数。
+
+输入字段说明：
+- title: 查询标题
+- season: 季数（可为 null）
+- episode: 集数（可为 null）
+- year: 年份（可为 null）
+- dynamicPlatformOrder: 平台偏好列表（可为 null）
+- preferAnimeId: 偏好动漫 ID（可为 null）
+- animes: 候选动漫列表
+  - animeId: 动漫id
+    animeTitle: 动漫标题
+    type: 类型
+    year: 发布年份
+    episodeCount: 总集数
+    source: 弹幕来源
+
+匹配规则 (按优先级排序):
+1. 如果preferAnimeId非空，且animes存在该animeId，则返回该id对应的anime和episode
+2. 标题相似度: 优先匹配标题相似度最高的条目
+3. 季度严格匹配: 如果指定了季度,必须严格匹配
+4. 类型匹配: episode为空则优先匹配电影，非空则匹配电视剧等
+5. 年份接近: 优先选择年份接近的
+6. 平台匹配：如果有多个高度相似的结果且dynamicPlatformOrder非空，则从前往后选择相对应的平台
+7. 集数完整: 如果有多个高度相似的结果,选择集数最完整的
+
+请分析哪个动漫最符合查询条件，如果指定了季数和集数，请也返回对应的集信息。
+请严格按照以下 JSON 格式返回结果，不要包含任何其他内容：
+{
+  "animeIndex": 匹配的动漫在列表中的索引(从0开始) 或 null
+}
+
+如果没有找到合适的匹配，返回：
+{
+  "animeIndex": null
+}
+```
+
 ## 采集源及对应平台列表
+<<<<<<< HEAD
 
 | 采集源   | 平台列表                                       |
 | -------- | ---------------------------------------------- |
@@ -495,6 +585,28 @@ API 支持返回 Bilibili 标准 XML 格式的弹幕数据，通过查询参数 
 | hanjutv  | hanjutv                                        |
 | bahamut  | bahamut                                        |
 | dandan   | dandan                                         |
+=======
+| 采集源      | 平台列表 |
+| ----------- | ----------- |
+| 360      | qiyi, bilibili1, imgo, youku, qq |
+| vod      | qiyi, bilibili1, imgo, youku, qq |
+| tmdb     | qiyi, bilibili1, youku, qq, migu |
+| douban   | qiyi, bilibili1, youku, qq, migu |
+| tencent  | qq |
+| youku    | youku |
+| iqiyi    | qiyi |
+| imgo     | imgo |
+| bilibili | bilibili1 |
+| migu     | migu |
+| sohu     | sohu |
+| leshi    | leshi |
+| xigua    | xigua |
+| maiduidui| maiduidui |
+| renren   | renren |
+| hanjutv  | hanjutv |
+| bahamut  | bahamut |
+| dandan   | dandan |
+>>>>>>> upstream/main
 | animeko  | [animeko](https://github.com/open-ani/animeko) |
 | custom   | custom                                         |
 
@@ -547,6 +659,7 @@ API 支持返回 Bilibili 标准 XML 格式的弹幕数据，通过查询参数 
 │   │   ├── iqiyi.js            # 爱奇艺源
 │   │   ├── kan360.js           # 360看源
 │   │   ├── leshi.js            # 乐视视频源
+│   │   ├── maiduidui.js        # 埋堆堆源
 │   │   ├── mango.js            # 芒果TV源
 │   │   ├── migu.js             # 咪咕视频源
 │   │   ├── other.js            # 第三方弹幕服务器
@@ -574,6 +687,7 @@ API 支持返回 Bilibili 标准 XML 格式的弹幕数据，通过查询参数 
 │   │       ├── requestrecords.js # 请求记录脚本
 │   │       └── systemsettings.js # 系统设置脚本
 │   └── utils/
+│       ├── ai-util.js          # AI相关处理工具
 │       ├── cache-util.js       # 缓存数据处理工具
 │       ├── codec-util.js       # 编解码工具
 │       ├── common-util.js      # 通用工具

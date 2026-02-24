@@ -1,7 +1,14 @@
-import {Globals} from "./configs/globals.js";
-import {jsonResponse} from "./utils/http-util.js";
-import {log, formatLogMessage} from "./utils/log-util.js";
-import {getRedisCaches, judgeRedisValid} from "./utils/redis-util.js";
+import { Globals } from './configs/globals.js';
+import { jsonResponse } from './utils/http-util.js';
+import { log, formatLogMessage } from './utils/log-util.js'
+import { getRedisCaches, judgeRedisValid } from "./utils/redis-util.js";
+import { cleanupExpiredIPs, findUrlById, getCommentCache, getLocalCaches, judgeLocalCacheValid } from "./utils/cache-util.js";
+import { formatDanmuResponse } from "./utils/danmu-util.js";
+import AIClient from './utils/ai-util.js';
+import { getBangumi, getComment, getCommentByUrl, getSegmentComment, matchAnime, searchAnime, searchEpisodes } from "./apis/dandan-api.js";
+import { handleConfig, handleUI, handleLogs, handleClearLogs, handleDeploy, handleClearCache, handleReqRecords } from "./apis/system-api.js";
+import { handleSetEnv, handleAddEnv, handleDelEnv, handleAiVerify } from "./apis/env-api.js";
+import { Segment } from "./models/dandan-model.js"
 import {
   cleanupExpiredIPs,
   findUrlById,
@@ -9,7 +16,7 @@ import {
   getLocalCaches,
   judgeLocalCacheValid,
 } from "./utils/cache-util.js";
-import {formatDanmuResponse} from "./utils/danmu-util.js";
+import { formatDanmuResponse } from "./utils/danmu-util.js";
 import {
   getBangumi,
   getComment,
@@ -29,8 +36,8 @@ import {
   handleClearCache,
   handleReqRecords,
 } from "./apis/system-api.js";
-import {handleSetEnv, handleAddEnv, handleDelEnv} from "./apis/env-api.js";
-import {Segment} from "./models/dandan-model.js";
+import { handleSetEnv, handleAddEnv, handleDelEnv } from "./apis/env-api.js";
+import { Segment } from "./models/dandan-model.js";
 import {
   handleCookieStatus,
   handleCookieVerify,
@@ -54,6 +61,19 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
     await judgeLocalCacheValid(path, deployPlatform);
   }
   await judgeRedisValid(path);
+  if (!globals.aiValid && globals.aiBaseUrl && globals.aiModel && globals.aiApiKey && path !== "/favicon.ico" && path !== "/robots.txt") {
+    const ai = new AIClient({
+      baseURL: globals.aiBaseUrl,
+      model: globals.aiModel,
+      apiKey: globals.aiApiKey,
+      systemPrompt: '回答尽量简洁',
+    })
+
+    const status = await ai.verify()
+    if (status.ok) {
+      globals.aiValid = true;
+    }
+  }
 
   log("info", `request url: ${JSON.stringify(url)}`);
   log("info", `request path: ${path}`);
@@ -80,7 +100,7 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
   globals.currentToken = isValidToken
     ? firstPart
     : isDefaultToken &&
-        (firstPart === "87654321" || knownApiPaths.includes(firstPart))
+      (firstPart === "87654321" || knownApiPaths.includes(firstPart))
       ? firstPart === "87654321"
         ? firstPart
         : "87654321"
@@ -216,7 +236,7 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
         // 返回 401
         log("error", `Invalid token in path: ${path}`);
         return jsonResponse(
-          {errorCode: 401, success: false, errorMessage: "Unauthorized"},
+          { errorCode: 401, success: false, errorMessage: "Unauthorized" },
           401,
         );
       }
@@ -234,7 +254,7 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
       }
       log("error", `Invalid or missing token in path: ${path}`);
       return jsonResponse(
-        {errorCode: 401, success: false, errorMessage: "Unauthorized"},
+        { errorCode: 401, success: false, errorMessage: "Unauthorized" },
         401,
       );
     }
@@ -255,23 +275,18 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
   log("info", path);
 
   // 智能处理API路径前缀，确保最终有一个正确的 /api/v2
-  if (
-    path !== "/" &&
-    path !== "/api/logs" &&
-    !path.startsWith("/api/env") &&
-    !path.startsWith("/api/deploy") &&
-    !path.startsWith("/api/cache") &&
-    !path.startsWith("/api/cookie") &&
-    !path.startsWith("/api/config")
-  ) {
+  if (path !== "/" && path !== "/api/logs" && !path.startsWith('/api/env')
+    && !path.startsWith('/api/deploy') && !path.startsWith('/api/cache')
+    && !path.startsWith('/api/cookie') && !path.startsWith('/api/config')
+    && !path.startsWith('/api/ai')) {
     log("info", `[Path Check] Starting path normalization for: "${path}"`);
     const pathBeforeCleanup = path; // 保存清理前的路径检查是否修改
 
     // 1. 清理：应对"用户填写/api/v2"+"客户端添加/api/v2"导致的重复前缀
-    while (path.startsWith("/api/v2/api/v2/")) {
+    while (path.startsWith('/api/v2/api/v2/')) {
       log("info", `[Path Check] Found redundant /api/v2 prefix. Cleaning...`);
       // 从第二个 /api/v2 的位置开始截取，相当于移除第一个
-      path = path.substring("/api/v2".length);
+      path = path.substring('/api/v2'.length);
     }
 
     // 打印日志：只有在发生清理时才显示清理后的路径，否则显示"无需清理"
@@ -283,17 +298,12 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
 
     // 2. 补全：如果路径缺少前缀（例如请求原始路径为 /search/anime），则补全
     const pathBeforePrefixCheck = path;
-    if (
-      !path.startsWith("/api/v2") &&
-      path !== "/" &&
-      !path.startsWith("/api/logs") &&
-      !path.startsWith("/api/env") &&
-      !path.startsWith("/api/cache") &&
-      !path.startsWith("/api/cookie") &&
-      !path.startsWith("/api/config")
-    ) {
+    if (!path.startsWith('/api/v2') && path !== '/' && !path.startsWith('/api/logs')
+      && !path.startsWith('/api/env') && !path.startsWith('/api/cache')
+      && !path.startsWith('/api/cookie') && !path.startsWith('/api/config')
+      && !path.startsWith('/api/ai')) {
       log("info", `[Path Check] Path is missing /api/v2 prefix. Adding...`);
-      path = "/api/v2" + path;
+      path = '/api/v2' + path;
     }
 
     // 打印日志：只有在发生添加前缀时才显示添加后的路径，否则显示"无需补全"
@@ -519,7 +529,7 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
     } catch (error) {
       log("error", `Error processing segmentcomment request: ${error.message}`);
       return jsonResponse(
-        {errorCode: 500, success: false, errorMessage: "Internal server error"},
+        { errorCode: 500, success: false, errorMessage: "Internal server error" },
         500,
       );
     }
@@ -587,7 +597,12 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
     return handleCookieSave(req);
   }
 
-  return jsonResponse({message: "Not found"}, 404);
+  // POST /api/ai/verify - 验证AI连通性
+  if (path === "/api/ai/verify" && method === "POST") {
+    return handleAiVerify(req);
+  }
+
+  return jsonResponse({ message: "Not found" }, 404);
 }
 
 function isRunningOnVercel() {
@@ -682,4 +697,4 @@ export async function netlifyHandler(event, context) {
 }
 
 // 为了测试导出 handleRequest
-export {handleRequest};
+export { handleRequest };
