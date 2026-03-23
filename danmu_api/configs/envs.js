@@ -2,6 +2,8 @@
  * 环境变量管理模块
  * 提供获取和设置环境变量的函数，支持 Cloudflare Workers 和 Node.js
  */
+import { parseOffsetRules } from '../utils/offset-util.js';
+
 export class Envs {
   static env;
 
@@ -286,6 +288,128 @@ export class Envs {
   }
 
   /**
+   * 解析 IP 黑名单列表
+   * @description 支持逗号/分号/换行分隔，支持 /regex/ 或 /regex/i 的正则格式，支持 IPv4/IPv6 CIDR（如 127.0.0.0/24、2001:db8::/64）
+   * @returns {Array} IP 黑名单规则列表
+   */
+  static resolveIpBlacklist() {
+    const rawList = this.get('IP_BLACKLIST', '', 'string', false).trim();
+
+    if (!rawList) {
+      this.accessedEnvVars.set('IP_BLACKLIST', []);
+      return [];
+    }
+
+    const entries = rawList
+      .split(/[\n,;]+/)
+      .map(item => item.trim())
+      .filter(Boolean);
+
+    const rules = [];
+
+    for (const entry of entries) {
+      try {
+        if (entry.startsWith('/') && entry.lastIndexOf('/') > 0) {
+          const lastSlashIndex = entry.lastIndexOf('/');
+          const pattern = entry.slice(1, lastSlashIndex);
+          const flags = entry.slice(lastSlashIndex + 1);
+          rules.push({ type: 'regex', value: new RegExp(pattern, flags) });
+          continue;
+        }
+
+        if (entry.includes('/')) {
+          const [ip, prefix] = entry.split('/').map(s => s.trim());
+          const prefixNum = Number(prefix);
+          const isIpv4 = this.isValidIpv4(ip);
+          const isIpv6 = this.isValidIpv6(ip);
+          if (Number.isInteger(prefixNum)) {
+            if (isIpv4 && prefixNum >= 0 && prefixNum <= 32) {
+              rules.push({ type: 'cidr', ip, prefix: prefixNum });
+              continue;
+            }
+            if (isIpv6 && prefixNum >= 0 && prefixNum <= 128) {
+              rules.push({ type: 'cidr', ip, prefix: prefixNum });
+              continue;
+            }
+          }
+        }
+
+        if (this.isValidIpv4(entry) || this.isValidIpv6(entry)) {
+          rules.push({ type: 'exact', value: entry });
+          continue;
+        }
+
+        const escaped = entry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        rules.push({ type: 'regex', value: new RegExp(`^${escaped}$`) });
+      } catch (error) {
+        console.warn(`Invalid IP_BLACKLIST entry: ${entry}, skipped.`);
+      }
+    }
+
+    this.accessedEnvVars.set('IP_BLACKLIST', entries);
+
+    return rules;
+  }
+
+  /**
+   * 校验 IPv4 地址合法性
+   * @param {string} ip IPv4 地址
+   * @returns {boolean}
+   */
+  static isValidIpv4(ip) {
+    if (!ip || typeof ip !== 'string') return false;
+    const parts = ip.split('.');
+    if (parts.length !== 4) return false;
+    return parts.every(part => {
+      if (!/^(\d{1,3})$/.test(part)) return false;
+      const num = Number(part);
+      return num >= 0 && num <= 255;
+    });
+  }
+
+  /**
+   * 校验 IPv6 地址合法性（支持 :: 缩写与 IPv4 映射）
+   * @param {string} ip IPv6 地址
+   * @returns {boolean}
+   */
+  static isValidIpv6(ip) {
+    if (!ip || typeof ip !== 'string') return false;
+    const normalized = ip.trim();
+    if (!normalized.includes(':')) return false;
+
+    const [left, right] = normalized.split('::');
+    if (normalized.split('::').length > 2) return false;
+
+    const leftParts = left ? left.split(':').filter(Boolean) : [];
+    let rightParts = right ? right.split(':').filter(Boolean) : [];
+
+    const expandIpv4Part = (parts) => {
+      if (parts.length === 0) return parts;
+      const last = parts[parts.length - 1];
+      if (!last.includes('.')) return parts;
+      if (!this.isValidIpv4(last)) return null;
+      const nums = last.split('.').map(n => Number(n));
+      const high = ((nums[0] << 8) | nums[1]).toString(16);
+      const low = ((nums[2] << 8) | nums[3]).toString(16);
+      return [...parts.slice(0, -1), high, low];
+    };
+
+    const leftExpanded = expandIpv4Part(leftParts);
+    if (!leftExpanded) return false;
+    rightParts = expandIpv4Part(rightParts);
+    if (!rightParts) return false;
+
+    const totalParts = leftExpanded.length + rightParts.length;
+    if (totalParts > 8) return false;
+
+    const isValidGroup = (part) => /^[0-9a-fA-F]{1,4}$/.test(part);
+    if (!leftExpanded.every(isValidGroup)) return false;
+    if (!rightParts.every(isValidGroup)) return false;
+
+    return true;
+  }
+
+  /**
    * 解析剧名过滤正则
    * @description 用于控制剧名过滤规则，没有默认值
    * @returns {RegExp|null} 过滤正则表达式或null
@@ -377,7 +501,7 @@ export class Envs {
       'VOD_REQUEST_TIMEOUT': { category: 'source', type: 'number', description: 'VOD请求超时时间，默认10000', min: 5000, max: 30000 },
       'BILIBILI_COOKIE': { category: 'source', type: 'text', description: 'B站Cookie' },
       'YOUKU_CONCURRENCY': { category: 'source', type: 'number', description: '优酷并发配置，默认8', min: 1, max: 16 },
-	  'REAL_TIME_PULL_DANDAN': { category: 'source', type: 'boolean', description: '弹弹第三方弹幕源实时拉取开关，默认为false（关闭），可选值：true、false' },
+      'REAL_TIME_PULL_DANDAN': { category: 'source', type: 'boolean', description: '弹弹第三方弹幕源实时拉取开关，默认为false（关闭），可选值：true、false' },
       
       // 匹配配置
       'PLATFORM_ORDER': { category: 'match', type: 'multi-select', options: this.ALLOWED_PLATFORMS, description: '平台排序配置，可以配置自动匹配时的优选平台。\n当配置合并平台的时候，可以指定期望的合并源，\n示例：一个结果返回了"dandan&bilibili1&animeko"和"youku"时，\n当配置"youku"时返回"youku" \n当配置"dandan&animeko"时返回"dandan&bilibili1&animeko"' },
@@ -400,13 +524,15 @@ export class Envs {
       'DANMU_SIMPLIFIED_TRADITIONAL': { category: 'danmu', type: 'select', options: ['default', 'simplified', 'traditional'], description: '弹幕简繁体转换设置：default（默认不转换）、simplified（繁转简）、traditional（简转繁）' },
       'CONVERT_TOP_BOTTOM_TO_SCROLL': { category: 'danmu', type: 'boolean', description: '顶部/底部弹幕转换为浮动弹幕' },
       'CONVERT_COLOR': { category: 'danmu', type: 'select', options: ['default', 'white', 'color'], description: '弹幕转换颜色配置' },
+      'COLOR_POOL': { category: 'danmu', type: 'text', description: '自定义颜色池（CONVERT_COLOR为color时生效），不配置使用默认颜色池，格式：十进制颜色值逗号分隔' },
       'DANMU_OUTPUT_FORMAT': { category: 'danmu', type: 'select', options: ['json', 'xml'], description: '弹幕输出格式，默认json' },
       'DANMU_PUSH_URL': { category: 'danmu', type: 'text', description: '弹幕推送地址，示例 http://127.0.0.1:9978/action?do=refresh&type=danmaku&path= ' },
       'LIKE_SWITCH': { category: 'danmu', type: 'boolean', description: '弹幕点赞数显示开关，默认开启' },
+      'DANMU_OFFSET': { category: 'danmu', type: 'text', sources: this.ALLOWED_SOURCES, description: '弹幕时间偏移配置，格式：剧名:秒 或 剧名/季:秒 或 剧名/季/集:秒，支持指定来源：剧名@来源:秒 或 剧名/季@来源1&来源2:秒，多条用逗号分隔，正数表示弹幕延后（向右），负数表示弹幕提前（向左），例如：overlord/S01:90,re-zero/S02@bilibili:120,re-zero/S02/E03@dandan&bilibili:10' },
 
       // 缓存配置
-      'SEARCH_CACHE_MINUTES': { category: 'cache', type: 'number', description: '搜索结果缓存时间(分钟)，默认1', min: 1, max: 120 },
-      'COMMENT_CACHE_MINUTES': { category: 'cache', type: 'number', description: '弹幕缓存时间(分钟)，默认1', min: 1, max: 120 },
+      'SEARCH_CACHE_MINUTES': { category: 'cache', type: 'number', description: '搜索结果缓存时间(分钟)，默认3', min: 1, max: 120 },
+      'COMMENT_CACHE_MINUTES': { category: 'cache', type: 'number', description: '弹幕缓存时间(分钟)，默认3', min: 1, max: 120 },
       'REMEMBER_LAST_SELECT': { category: 'cache', type: 'boolean', description: '记住手动选择结果' },
       'MAX_LAST_SELECT_MAP': { category: 'cache', type: 'number', description: '记住上次选择映射缓存大小限制', min: 10, max: 1000 },
       'UPSTASH_REDIS_REST_URL': { category: 'cache', type: 'text', description: 'Upstash Redis请求链接' },
@@ -421,6 +547,7 @@ export class Envs {
       'DEPLOY_PLATFROM_PROJECT': { category: 'system', type: 'text', description: '部署平台项目名称' },
       'DEPLOY_PLATFROM_TOKEN': { category: 'system', type: 'text', description: '部署平台访问令牌' },
       'NODE_TLS_REJECT_UNAUTHORIZED': { category: 'system', type: 'number', description: '在建立 HTTPS 连接时是否验证服务器的 SSL/TLS 证书，0表示忽略，默认为1', min: 0, max: 1 },
+      'IP_BLACKLIST': { category: 'system', type: 'text', description: 'IP 黑名单列表，支持逗号/分号/换行分隔，支持 /regex/ 或 /regex/i 正则，支持 IPv4/IPv6 CIDR（如 10.0.0.0/4、2001:db8::/64）。命中则拒绝请求' },
     };
     
     return {
@@ -437,7 +564,7 @@ export class Envs {
       vodRequestTimeout: this.get('VOD_REQUEST_TIMEOUT', '10000', 'string'), // vod超时时间（默认10秒）
       bilibliCookie: this.get('BILIBILI_COOKIE', '', 'string', true), // b站cookie
       youkuConcurrency: Math.min(this.get('YOUKU_CONCURRENCY', 8, 'number'), 16), // 优酷并发配置
-	  realTimePullDandan: this.get('REAL_TIME_PULL_DANDAN', false, 'boolean'), // 弹弹第三方数据源实时拉取开关
+      realTimePullDandan: this.get('REAL_TIME_PULL_DANDAN', false, 'boolean'), // 弹弹第三方数据源实时拉取开关
       platformOrderArr: this.resolvePlatformOrder(), // 自动匹配优选平台
       animeTitleFilter: this.resolveAnimeTitleFilter(), // 剧名正则过滤
       episodeTitleFilter: this.resolveEpisodeTitleFilter(), // 剧集标题正则过滤
@@ -448,6 +575,8 @@ export class Envs {
       danmuSimplifiedTraditional: this.get('DANMU_SIMPLIFIED_TRADITIONAL', 'default', 'string'), // 弹幕简繁体转换设置：default（默认不转换）、simplified（繁转简）、traditional（简转繁）
       danmuPushUrl: this.get('DANMU_PUSH_URL', '', 'string'), // 代理/反代地址
       likeSwitch: this.get('LIKE_SWITCH', true, 'boolean'), // 弹幕点赞数显示开关，默认开启
+      danmuOffset: this.get('DANMU_OFFSET', '', 'string'), // 弹幕时间偏移配置
+      danmuOffsetRules: parseOffsetRules(this.get('DANMU_OFFSET', '', 'string')), // 解析后的偏移规则（缓存）
       tmdbApiKey: this.get('TMDB_API_KEY', '', 'string', true), // TMDB API KEY
       redisUrl: this.get('UPSTASH_REDIS_REST_URL', '', 'string', true), // upstash redis url
       redisToken: this.get('UPSTASH_REDIS_REST_TOKEN', '', 'string', true), // upstash redis url
@@ -455,15 +584,17 @@ export class Envs {
       rateLimitMaxRequests: this.get('RATE_LIMIT_MAX_REQUESTS', 3, 'number'), // 限流配置：时间窗口内最大请求次数（默认 3，0表示不限流）
       enableAnimeEpisodeFilter: this.get('ENABLE_ANIME_EPISODE_FILTER', false, 'boolean'), // 控制手动搜索的时候是否根据ANIME_TITLE_FILTER进行剧名过滤以及根据EPISODE_TITLE_FILTER进行集标题过滤（默认 false，禁用过滤）
       logLevel: this.get('LOG_LEVEL', 'info', 'string'), // 日志级别配置（默认 info，可选值：error, warn, info）
-      searchCacheMinutes: this.get('SEARCH_CACHE_MINUTES', 1, 'number'), // 搜索结果缓存时间配置（分钟，默认 1）
-      commentCacheMinutes: this.get('COMMENT_CACHE_MINUTES', 1, 'number'), // 弹幕缓存时间配置（分钟，默认 1）
+      searchCacheMinutes: this.get('SEARCH_CACHE_MINUTES', 3, 'number'), // 搜索结果缓存时间配置（分钟，默认 3）
+      commentCacheMinutes: this.get('COMMENT_CACHE_MINUTES', 3, 'number'), // 弹幕缓存时间配置（分钟，默认 3）
       convertTopBottomToScroll: this.get('CONVERT_TOP_BOTTOM_TO_SCROLL', false, 'boolean'), // 顶部/底部弹幕转换为浮动弹幕配置（默认 false，禁用转换）
       convertColor: this.get('CONVERT_COLOR', 'default', 'string'), // 弹幕转换颜色配置，支持 default、white、color（默认 default，禁用转换）
+      colorPool: this.get('COLOR_POOL', '16777215,16777215,16777215,16777215,16777215,16777215,16777215,16777215,16744319,16752762,16774799,9498256,8388564,8900346,14204888,16758465', 'string'), // 自定义颜色池，CONVERT_COLOR为color时生效
       danmuOutputFormat: this.get('DANMU_OUTPUT_FORMAT', 'json', 'string'), // 弹幕输出格式配置（默认 json，可选值：json, xml）
       strictTitleMatch: this.get('STRICT_TITLE_MATCH', false, 'boolean'), // 严格标题匹配模式配置（默认 false，宽松模糊匹配）
       titleToChinese: this.get('TITLE_TO_CHINESE', false, 'boolean'), // 外语标题转换中文开关
       animeTitleSimplified: this.get('ANIME_TITLE_SIMPLIFIED', false, 'boolean'), // 搜索的剧名标题自动繁转简
       titleMappingTable: this.resolveTitleMappingTable(), // 剧名映射表，用于自动匹配时替换标题进行搜索
+      ipBlacklist: this.resolveIpBlacklist(), // IP 黑名单（支持正则）
       aiBaseUrl: this.get('AI_BASE_URL', 'https://api.openai.com/v1', 'string'), // AI服务基础URL
       aiModel: this.get('AI_MODEL', 'gpt-4o', 'string'), // AI模型名称
       aiApiKey: this.get('AI_API_KEY', '', 'string', true), // AI服务API密钥
