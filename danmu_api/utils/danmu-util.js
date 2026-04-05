@@ -2,7 +2,7 @@ import { globals } from '../configs/globals.js';
 import { log } from './log-util.js'
 import { jsonResponse, xmlResponse } from "./http-util.js";
 import { traditionalized } from './zh-util.js';
-
+import { postProcessDanmu } from '../apis/douban-api.js';
 // =====================
 // danmu处理相关函数
 // =====================
@@ -508,5 +508,6 @@ export function formatDanmuResponse(danmuData, queryFormat) {
   }
 
   // 默认返回 JSON
-  return jsonResponse(danmuData);
+  const processedData = postProcessDanmu(danmuData);
+  return jsonResponse(processedData);
 }

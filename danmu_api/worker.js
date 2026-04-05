@@ -16,7 +16,7 @@ import {
     handleQRCheck,
     handleCookieSave
 } from "./utils/cookie-util.js";
-
+import { getAnimeByDouban } from "./apis/douban-api.js";
 let globals;
 
 async function handleRequest(req, env, deployPlatform, clientIp) {
@@ -288,7 +288,10 @@ async function handleRequest(req, env, deployPlatform, clientIp) {
   if (path === "/" && method === "GET") {
     return handleUI();
   }
-
+  // GET /api/v2/douban
+  if (path === "/api/v2/douban" && method === "GET") {
+    return getAnimeByDouban(url);
+  }
   // GET /api/v2/search/anime
   if (path === "/api/v2/search/anime" && method === "GET") {
     return searchAnime(url);
