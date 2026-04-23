@@ -1,5 +1,6 @@
 import { log } from './log-util.js'
 import {httpGet, httpPost} from "./http-util.js";
+import { globals } from '../configs/globals.js';
 
 // ---------------------
 // 豆瓣 API 工具方法
@@ -8,15 +9,20 @@ import {httpGet, httpPost} from "./http-util.js";
 // 豆瓣 API GET 请求
 async function doubanApiGet(url) {
   const doubanApi = "https://m.douban.com/rexxar/api/v2";
+  const headers = {
+    "Referer": "https://m.douban.com/movie/",
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  };
+
+  if (globals.doubanCookie) {
+    headers["Cookie"] = globals.doubanCookie;
+  }
 
   try {
     const response = await httpGet(`${doubanApi}${url}`, {
       method: 'GET',
-      headers: {
-        "Referer": "https://m.douban.com/movie/",
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-      }
+      headers
     });
     if (response.status != 200) return null;
 
@@ -62,6 +68,13 @@ async function doubanApiPost(url, data={}) {
 export async function searchDoubanTitles(keyword, count = 20) {
   const url = `/search?q=${keyword}&start=0&count=${count}&type=movie`;
   return await doubanApiGet(url);
+}
+
+// 使用 豆瓣 公开 API 查询片名
+export async function searchDoubanTitlesByPublic(keyword, count = 20) {
+  const url = `/movie/search`;
+  const data = { q: keyword, start: 0, count: count };
+  return await doubanApiPost(url, data);
 }
 
 // 使用 豆瓣 API 查询详情

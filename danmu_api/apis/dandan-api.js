@@ -10,7 +10,7 @@ import {
     updateLocalCaches, setLastSearch, getLastSearch, findAnimeTitleById, findIndexById
 } from "../utils/cache-util.js";
 import { formatDanmuResponse, convertToDanmakuJson } from "../utils/danmu-util.js";
-import { resolveOffset, applyOffset } from "../utils/offset-util.js";
+import { resolveOffset, resolveOffsetRule, applyOffset } from "../utils/offset-util.js";
 import { 
   extractEpisodeTitle, convertChineseNumber, parseFileName, createDynamicPlatformOrder, normalizeSpaces, 
   extractYear, titleMatches, extractAnimeInfo, extractEpisodeNumberFromTitle
@@ -187,14 +187,15 @@ function matchYear(anime, queryYear) {
 }
 
 export function matchSeason(anime, queryTitle, season) {
-  const normalizedAnimeTitle = normalizeSpaces(anime.animeTitle);
+  // 先从原始带括号的标题中分离出名称主体再对主体进行净化剥离非法字符
+  const match = anime.animeTitle.match(/^(.*?)\(\d{4}\)/);
+  const originalTitle = match ? match[1].trim() : anime.animeTitle.split("(")[0].trim();
+  const normalizedAnimeTitle = normalizeSpaces(originalTitle);
   const normalizedQueryTitle = normalizeSpaces(queryTitle);
 
   if (normalizedAnimeTitle.includes(normalizedQueryTitle)) {
-    const match = normalizedAnimeTitle.match(/^(.*?)\(\d{4}\)/);
-    const title = match ? match[1].trim() : normalizedAnimeTitle.split("(")[0].trim();
-    if (title.startsWith(normalizedQueryTitle)) {
-      const afterTitle = title.substring(normalizedQueryTitle.length).trim();
+    if (normalizedAnimeTitle.startsWith(normalizedQueryTitle)) {
+      const afterTitle = normalizedAnimeTitle.substring(normalizedQueryTitle.length).trim();
       if (afterTitle === '' && season === 1) {
         return true;
       }
@@ -576,7 +577,7 @@ function extractPlatformFromTitle(title) {
 }
 
 // 根据集数匹配episode（优先使用集标题中的集数，其次使用episodeNumber，最后使用数组索引）
-function findEpisodeByNumber(filteredEpisodes, targetEpisode, platform = null) {
+function findEpisodeByNumber(filteredEpisodes, episode, targetEpisode, platform = null) {
   if (!filteredEpisodes || filteredEpisodes.length === 0) {
     return null;
   }
@@ -598,7 +599,7 @@ function findEpisodeByNumber(filteredEpisodes, targetEpisode, platform = null) {
   // 策略1：从集标题中提取集数进行匹配
   for (const ep of platformEpisodes) {
     const extractedNumber = extractEpisodeNumberFromTitle(ep.episodeTitle);
-    if (extractedNumber === targetEpisode) {
+    if (episode === targetEpisode && extractedNumber === targetEpisode) {
       log("info", `Found episode by title number: ${ep.episodeTitle} (extracted: ${extractedNumber})`);
       return ep;
     }
@@ -710,7 +711,7 @@ async function matchAniAndEpByAi(season, episode, year, searchData, title, req, 
         log("info", "过滤后的集标题", filteredEpisodes.map(episode => episode.episodeTitle));
 
         // 匹配集数 (注意：findEpisodeByNumber 已增强支持模糊平台匹配)
-        filteredEpisode = findEpisodeByNumber(filteredEpisodes, episode);
+        filteredEpisode = findEpisodeByNumber(filteredEpisodes, episode, episode);
     } else {
         // 电影模式逻辑
         if (bangumiData.bangumi.episodes.length > 0) {
@@ -855,7 +856,7 @@ async function matchAniAndEp(season, episode, year, searchData, title, req, plat
         }
 
         // 匹配集数 (注意：findEpisodeByNumber 已增强支持模糊平台匹配)
-        matchedEpisode = findEpisodeByNumber(filteredEpisodes, targetEpisode, platform);
+        matchedEpisode = findEpisodeByNumber(filteredEpisodes, episode, targetEpisode, platform);
     } else {
         // 电影模式逻辑
         if (bangumiData.bangumi.episodes.length > 0) {
@@ -942,7 +943,7 @@ async function fallbackMatchAniAndEp(searchData, req, season, episode, year, res
       }
 
       // 使用新的集数匹配策略
-      const matchedEpisode = findEpisodeByNumber(filteredEpisodes, targetEpisode, null);
+      const matchedEpisode = findEpisodeByNumber(filteredEpisodes, episode, targetEpisode, null);
       if (matchedEpisode) {
         resEpisode = matchedEpisode;
         resAnime = anime;
@@ -1465,16 +1466,11 @@ async function fetchMergedComments(url, animeTitle, commentId) {
             const raw = await sourceInstance.getEpisodeDanmu(realId, parts);
             const formatted = sourceInstance.formatComments(raw);
             
-			// 给合并工具里的每一条弹幕打上独立的原始源标签
+            // 给合并工具里的每一条弹幕打上独立的原始源标签
             if (formatted && Array.isArray(formatted)) {
                 formatted.forEach(item => {
                     if (!item._sourceLabel) item._sourceLabel = sourceLabel;
                 });
-            }
-			
-            // 提取并挂载 dandan 源传出的精确偏移量
-            if (raw && raw.relatedShifts) {
-              formatted.relatedShifts = raw.relatedShifts;
             }
 
             stats[sourceLabel] = formatted.length;
@@ -1502,15 +1498,8 @@ async function fetchMergedComments(url, animeTitle, commentId) {
   // 等待所有源请求完成
   const results = await Promise.all(tasks);
   
-  // 跨源时间轴对齐（仅当存在 dandan 源时执行）
-  if (sourceNames.includes('dandan')) {
-    // 提取精确偏移集合
-    const dandanIndex = sourceNames.indexOf('dandan');
-    const dandanShifts = (results[dandanIndex] && results[dandanIndex].relatedShifts) ? results[dandanIndex].relatedShifts : {};
-
-    // 执行对齐函数
-    alignSourceTimelines(results, sourceNames, realIds, dandanShifts);
-  }
+  // 调用以dandan为基准的跨源时间轴对齐函数（仅当存在 dandan 源时执行）
+  alignSourceTimelines(results, sourceNames, realIds);
 
   // 按来源分别应用弹幕时间偏移（对齐后、合并前）
   if (globals.danmuOffsetRules?.length > 0 && animeTitle && commentId) {
@@ -1521,16 +1510,26 @@ async function fetchMergedComments(url, animeTitle, commentId) {
       episode ||= findIndexById(commentId) + 1;
       const seasonStr = `S${season.toString().padStart(2, '0')}`;
       const episodeStr = `E${episode.toString().padStart(2, '0')}`;
-
-      results.forEach((list, idx) => {
-        const offset = resolveOffset(globals.danmuOffsetRules, {
-          anime: baseTitle, season: seasonStr, episode: episodeStr, source: sourceNames[idx]
+      for (let idx = 0; idx < results.length; idx++) {
+        const list = results[idx];
+        const offsetRule = resolveOffsetRule(globals.danmuOffsetRules, {
+          anime: baseTitle,
+          season: seasonStr,
+          episode: episodeStr,
+          source: sourceNames[idx]
         });
-        if (offset !== 0 && Array.isArray(list)) {
-          log("info", `[Merge] 应用偏移 ${offset}s -> ${sourceNames[idx]} (${baseTitle}/${seasonStr}/${episodeStr})`);
-          results[idx] = applyOffset(list, offset);
+        const offset = offsetRule?.offset || 0;
+        if (offset !== 0) {
+          const targetUrl = realIds[idx];
+          const videoDuration = offsetRule?.usePercent ? await resolveUrlDuration(targetUrl) : 0;
+          const offsetMode = offsetRule?.usePercent ? '%' : 's';
+          log("info", `[Merge] 应用偏移 ${offset}${offsetMode} -> ${sourceNames[idx]} (${baseTitle}/${seasonStr}/${episodeStr})${offsetRule?.usePercent ? `, duration=${videoDuration}s` : ''}`);
+          results[idx] = applyOffset(list, offset, {
+            usePercent: offsetRule?.usePercent,
+            videoDuration
+          });
         }
-      });
+      }
     }
   }
 
@@ -1641,7 +1640,7 @@ export async function getComment(path, queryFormat, segmentFlag, clientIp, inclu
 
     if (clientIp) {
       const lastSearch = getLastSearch(clientIp);
-      if (lastSearch && lastSearch.episodeId === commentId && lastSearch.title && lastSearch.season && lastSearch.episode && episodeTitle) {
+      if (lastSearch && lastSearch.title && lastSearch.season && lastSearch.episode && episodeTitle) {
         lastTitle = lastSearch.title;
         lastSeason = lastSearch.season;
         offset = `${lastSearch.episode}:${episodeTitle}`;
@@ -1674,12 +1673,17 @@ export async function getComment(path, queryFormat, segmentFlag, clientIp, inclu
     episode ||= findIndexById(commentId) + 1;
     const seasonStr = `S${season.toString().padStart(2, '0')}`;
     const episodeStr = `E${episode.toString().padStart(2, '0')}`;
-    const offset = resolveOffset(globals.danmuOffsetRules, {
+    const offsetRule = resolveOffsetRule(globals.danmuOffsetRules, {
       anime: baseTitle, season: seasonStr, episode: episodeStr, source
     });
+    const offset = offsetRule?.offset || 0;
     if (offset !== 0) {
-      log("info", `Applying danmu offset: ${offset}s for ${baseTitle}/${seasonStr}/${episodeStr}`);
-      danmus = applyOffset(danmus, offset);
+      const videoDuration = offsetRule?.usePercent ? await resolveUrlDuration(url) : 0;
+      log("info", `Applying danmu offset: ${offset}${offsetRule?.usePercent ? '%' : 's'} for ${baseTitle}/${seasonStr}/${episodeStr}${offsetRule?.usePercent ? `, duration=${videoDuration}s` : ''}`);
+      danmus = applyOffset(danmus, offset, {
+        usePercent: offsetRule?.usePercent,
+        videoDuration
+      });
     }
   }
 
@@ -1869,7 +1873,7 @@ export async function getSegmentComment(segment, queryFormat) {
       danmus = await renrenSource.getSegmentComments(segment);
     } else if (platform === "dandan") {
       danmus = await dandanSource.getSegmentComments(segment);
-	  } else if (platform === "animeko") {
+    } else if (platform === "animeko") {
       danmus = await animekoSource.getSegmentComments(segment);
     } else if (platform === "custom") {
       danmus = await customSource.getSegmentComments(segment);
