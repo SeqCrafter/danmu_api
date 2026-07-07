@@ -104,6 +104,25 @@ function getActiveSearchCacheEntries() {
     return activeEntries;
 }
 
+// 清除 Map 中所有已超过 TTL 的过期条目
+// 使用 Map 自身的迭代器遍历并删除，不依赖 getActiveSearchCacheEntries 的返回值
+function sweepExpiredCache(cacheMap, cacheMinutes, cacheName) {
+    const now = Date.now();
+    let sweptCount = 0;
+
+    for (const [key, entry] of cacheMap.entries()) {
+        const ageMinutes = (now - entry.timestamp) / (1000 * 60);
+        if (ageMinutes > cacheMinutes) {
+            cacheMap.delete(key);
+            sweptCount++;
+        }
+    }
+
+    if (sweptCount > 0) {
+        log("info", `[Cache] ${cacheName} TTL 扫描完毕，已移除 ${sweptCount} 个过期条目，剩余 ${cacheMap.size} 个`);
+    }
+}
+
 function matchesAnimeId(anime, idStr) {
     return String(anime?.animeId) === idStr || String(anime?.bangumiId) === idStr;
 }
@@ -279,11 +298,21 @@ export function getSearchCache(keyword, detailsMap = null) {
 export function setSearchCache(keyword, results, detailsMap = null) {
     const details = collectUniqueAnimeDetails(detailsMap);
 
+    // 写入前先清理所有过期条目
+    sweepExpiredCache(globals.searchCache, globals.searchCacheMinutes, 'searchCache');
+
     globals.searchCache.set(keyword, {
         results: results,
         details: details,
         timestamp: Date.now()
     });
+
+    // TTL 清理后仍未降回上限，则按插入顺序移除最早条目作为安全兜底
+    if (globals.searchCache.size > 500) {
+        const oldestKey = globals.searchCache.keys().next().value;
+        globals.searchCache.delete(oldestKey);
+        log("info", `[Cache] searchCache TTL清理后仍达上限，已移除最早条目: ${oldestKey}`);
+    }
 
     log("info", `[Cache] Cached search results for "${keyword}" (${results.length} animes)`);
 }
@@ -319,10 +348,20 @@ export function getCommentCache(videoUrl) {
 
 // 设置弹幕缓存
 export function setCommentCache(videoUrl, comments) {
+    // 写入前先清理所有过期条目
+    sweepExpiredCache(globals.commentCache, globals.commentCacheMinutes, 'commentCache');
+
     globals.commentCache.set(videoUrl, {
         comments: comments,
         timestamp: Date.now()
     });
+
+    // TTL 清理后仍未降回上限，则按插入顺序移除最早条目作为安全兜底
+    if (globals.commentCache.size > 500) {
+        const oldestKey = globals.commentCache.keys().next().value;
+        globals.commentCache.delete(oldestKey);
+        log("info", `[Cache] commentCache TTL清理后仍达上限，已移除最早条目: ${oldestKey}`);
+    }
 
     log("info", `[Cache] Cached comments for "${videoUrl}" (${comments.length} comments)`);
 }

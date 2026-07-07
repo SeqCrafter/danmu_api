@@ -1049,7 +1049,7 @@ function findCrossSeasonEpisodeMap(searchData, title, year, season, episode, pla
   // 仅在当前季集三种匹配策略均未命中时才启动相对顺延溢出机制
   if (!season || !episode) return { resEpisode: null, resAnime: null };
 
-  log("info", `[Spillover] 当前季集匹配策略失败 (S${season}E${episode})，正在进行跨季集数映射匹配...`);
+  log("info", `[system] [Spillover] 当前季集匹配策略失败 (S${season}E${episode})，正在进行跨季集数映射匹配...`);
   const normalizedTitle = normalizeSpaces(title);
   const seasonMap = new Map();
 
@@ -1114,7 +1114,7 @@ function findCrossSeasonEpisodeMap(searchData, title, year, season, episode, pla
       if (platform && getPlatformMatchScore(extractEpisodeTitle(absoluteMatch.episodeTitle), platform) === 0) {
           break;
       }
-      log("info", `[Spillover] 跨季溢出查找命中 (按绝对标题数字) -> 所在季：S${currentSeason} 集标题：${absoluteMatch.episodeTitle}`);
+      log("info", `[system] [Spillover] 跨季溢出查找命中 (按绝对标题数字) -> 所在季：S${currentSeason} 集标题：${absoluteMatch.episodeTitle}`);
       bestRes = {
         anime: seasonData.anime,
         episode: absoluteMatch,
@@ -1128,7 +1128,7 @@ function findCrossSeasonEpisodeMap(searchData, title, year, season, episode, pla
       if (platform && getPlatformMatchScore(extractEpisodeTitle(targetEp.episodeTitle), platform) === 0) {
           break;
       }
-      log("info", `[Spillover] 跨季溢出查找命中 (按相对排位计算) -> 所在季：S${currentSeason} 集标题：${targetEp.episodeTitle}`);
+      log("info", `[system] [Spillover] 跨季溢出查找命中 (按相对排位计算) -> 所在季：S${currentSeason} 集标题：${targetEp.episodeTitle}`);
       bestRes = {
         anime: seasonData.anime,
         episode: targetEp,
@@ -1137,7 +1137,7 @@ function findCrossSeasonEpisodeMap(searchData, title, year, season, episode, pla
       break;
     }
 
-    log("info", `[Spillover] S${currentSeason} 共有 ${allEps.length} 集(已过滤番外)，剩余目标集数为 ${currentTargetEpisode}，映射至 S${currentSeason + 1} 继续查找`);
+    log("info", `[system] [Spillover] S${currentSeason} 共有 ${allEps.length} 集(已过滤番外)，剩余目标集数为 ${currentTargetEpisode}，映射至 S${currentSeason + 1} 继续查找`);
     currentTargetEpisode -= allEps.length;
     currentSeason++;
   }
@@ -1377,15 +1377,17 @@ async function fallbackMatchAniAndEp(searchData, req, season, episode, year, tit
   }
 
   // 跨季兜底溢出查找逻辑
+  let isSpillover = false;
   if (!resEpisode && season && episode) {
     const spilloverRes = findCrossSeasonEpisodeMap(searchData, title, year, season, episode, null, detailStore);
     if (spilloverRes.resEpisode) {
       resEpisode = spilloverRes.resEpisode;
       resAnime = spilloverRes.resAnime;
+      isSpillover = true;
     }
   }
 
-  return {resEpisode, resAnime};
+  return {resEpisode, resAnime, isSpillover};
 }
 
 export async function extractTitleSeasonEpisode(cleanFileName) {
@@ -1544,6 +1546,7 @@ export async function matchAnime(url, req, clientIp) {
 
     let resAnime;
     let resEpisode;
+    let spilloverMatched = false;
 
     let resData = {
       "errorCode": 0,
@@ -1583,11 +1586,13 @@ export async function matchAnime(url, req, clientIp) {
         const __ret = await fallbackMatchAniAndEp(searchData, req, season, episode, year, title, resEpisode, resAnime, offsets, requestAnimeDetailsMap);
         resEpisode = __ret.resEpisode;
         resAnime = __ret.resAnime;
+        // 跨季集数顺延映射的结果不更新 lastSearch，防止无关番剧污染 lastSelectMap 偏好记录
+        spilloverMatched = __ret.isSpillover;
       }
     }
 
     if (resEpisode) {
-      if (clientIp) {
+      if (clientIp && !spilloverMatched) {
         setLastSearch(clientIp, { title, season, episode, episodeId: resEpisode.episodeId });
       }
       resData["matches"] = [
@@ -1999,7 +2004,7 @@ export async function getComment(path, queryFormat, segmentFlag, clientIp, inclu
   let animeTitle = findAnimeTitleById(commentId);
   let url = findUrlById(commentId);
   let title = findTitleById(commentId);
-  let plat = title ? (title.match(/【(.*?)】/) || [null])[0]?.replace(/[【】]/g, '') : null;
+  let plat = title ? extractEpisodeTitle(title) : null;
   const shouldAttachDuration = shouldIncludeVideoDuration(queryFormat, includeDuration);
   log("info", "[system] [LogVar-API] comment url...", url);
   log("info", "[system] [LogVar-API] comment title...", title);

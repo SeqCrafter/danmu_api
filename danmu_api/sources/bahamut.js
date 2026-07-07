@@ -22,7 +22,7 @@ export default class BahamutSource extends BaseSource {
       // 提前获取本地匹配结果
       if (globals.useBangumiData) {
         localMatches = await searchBangumiData(keyword, ['gamer', 'gamer_hk']);
-        log("info", `[Bahamut] Bangumi-Data 本地命中 ${localMatches.length} 条数据`);
+        log("info", `[Bahamut] Bangumi-Data 本地命中 ${localMatches.length} 条数据（检索词：${keyword}）`);
       }
 
       // 筛选出含有 video_sn 的本地匹配项

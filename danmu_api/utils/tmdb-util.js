@@ -220,7 +220,7 @@ export async function getTmdbJaOriginalTitle(title, signal = null, sourceLabel =
       const displayTitle = m.titles.find(t => t && t.includes(cleanTitle)) || m.titles[1] || m.title;
       const jaOriginalTitle = m.title; // Bangumi Data 的主标题就是原名
 
-      log("info", `[Utils] [TMDB] Bangumi-Data 本地命中，提取原名成功: 原名=${jaOriginalTitle}, 别名=${displayTitle}`);
+      log("info", `[Utils] [TMDB] Bangumi-Data 本地命中，提取原名成功: 原名=${jaOriginalTitle}, 别名=${displayTitle}（检索词：${cleanTitle}）`);
       return { title: jaOriginalTitle, cnAlias: displayTitle };
     }
   }
@@ -589,7 +589,7 @@ export async function getTMDBChineseTitle(title, season = null, episode = null) 
       // 找一个不全是外文的翻译作为中文名
       const displayTitle = m.titles.find(t => t && !isNonChinese(t)) || m.titles[1];
       if (displayTitle && !isNonChinese(displayTitle)) {
-        log("info", `[Utils] [TMDB] 命中本地 Bangumi Data: ${title} -> ${displayTitle}`);
+        log("info", `[Utils] [TMDB] 命中本地 Bangumi Data: ${title} -> ${displayTitle}（检索词：${cleanTitle}）`);
         return displayTitle;
       }
     }

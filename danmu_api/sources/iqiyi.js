@@ -2,7 +2,7 @@ import BaseSource from './base.js';
 import { log } from "../utils/log-util.js";
 import { buildQueryString, httpGet} from "../utils/http-util.js";
 import { printFirst200Chars, titleMatches, getExplicitSeasonNumber, extractSeasonNumberFromAnimeTitle } from "../utils/common-util.js";
-import { md5, convertToAsciiSum, decodeHtmlEntities } from "../utils/codec-util.js";
+import { md5, convertToAsciiSum, decodeHtmlEntities, base64ToBytes } from "../utils/codec-util.js";
 import { generateValidStartDate } from "../utils/time-util.js";
 import { addAnime, removeEarliestAnime } from "../utils/cache-util.js";
 import { globals } from '../configs/globals.js';
@@ -56,24 +56,43 @@ export default class IqiyiSource extends BaseSource {
       const queryString = buildQueryString(params);
       const url = `https://mesh.if.iqiyi.com/portal/lw/search/homePageV3?${queryString}`;
 
-      const response = await httpGet(url, {
-        headers: {
-          'accept': '*/*',
-          'origin': 'https://www.iqiyi.com',
-          'referer': 'https://www.iqiyi.com/',
-          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-      });
+      const doSearch = async () => {
+        const resp = await httpGet(url, {
+          headers: {
+            'accept': '*/*',
+            'origin': 'https://www.iqiyi.com',
+            'referer': 'https://www.iqiyi.com/',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          }
+        });
+        if (!resp || !resp.data) return null;
+        return typeof resp.data === "string" ? JSON.parse(resp.data) : resp.data;
+      };
 
-      if (!response || !response.data) {
+      // 搜索接口风控时延迟重试，最多重试两次
+      const MAX_RETRIES = 2;
+      let data = await doSearch();
+      for (let attempt = 0; attempt < MAX_RETRIES && (!data || data.code === "-1"); attempt++) {
+        const reason = !data ? "搜索响应为空" : `搜索接口风控 (code=${data.code})`;
+        log("info", `[iQiyi] ${reason}，等待 1.5 秒后重试 (${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise(r => setTimeout(r, 1500));
+        data = await doSearch();
+      }
+
+      if (!data) {
         log("info", "[iQiyi] 搜索响应为空");
         return [];
       }
 
-      const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data;
+      if (data.code === "-1") {
+        log("info", "[iQiyi] 搜索接口风控 (code=-1)，重试后仍失败");
+        log("info", `[iQiyi] 搜索原始数据: ${JSON.stringify(data)}`);
+        return [];
+      }
 
       if (!data.data || !data.data.templates) {
         log("info", "[iQiyi] 搜索无结果");
+        log("info", `[iQiyi] 搜索原始数据: ${JSON.stringify(data)}`);
         return [];
       }
 
@@ -901,7 +920,7 @@ export default class IqiyiSource extends BaseSource {
         return [];
       }
 
-      const compressed = this._base64ToUint8Array(response.data);
+      const compressed = base64ToBytes(response.data);
       const payload = await this._decompressBrotli(compressed);
 
       if (payload[0] === 60) {
@@ -913,23 +932,6 @@ export default class IqiyiSource extends BaseSource {
       log("error", "[iQiyi] 请求分片弹幕失败:", error);
       return []; // 返回空数组而不是抛出错误，保持与getEpisodeDanmu一致的行为
     }
-  }
-
-  _base64ToUint8Array(base64) {
-    if (typeof atob === "function") {
-      const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      return bytes;
-    }
-
-    if (typeof Buffer !== "undefined") {
-      return new Uint8Array(Buffer.from(base64, "base64"));
-    }
-
-    throw new Error("当前环境不支持 base64 解码");
   }
 
   async _decompressBrotli(bytes) {

@@ -241,6 +241,29 @@ export async function handleClearCache() {
   }
 }
 
+// 隐藏接口 URL 查询串中的参数值，保留路径与参数名（key=value -> key=***）
+function maskInterfaceValues(interfaceStr) {
+  const qIndex = interfaceStr.indexOf('?');
+  if (qIndex === -1) return interfaceStr; // 无查询串，保持原样
+  const path = interfaceStr.slice(0, qIndex);
+  const query = interfaceStr.slice(qIndex + 1);
+  // 逐个把 key=value 的 value 替换为 ***，保留 key
+  const maskedQuery = query.replace(/([^&=]+)=([^&]*)/g, (_, key) => `${key}=***`);
+  return `${path}?${maskedQuery}`;
+}
+
+// 递归隐藏请求体的所有叶子值，保留 key 与数组/对象结构
+function maskParamValues(value) {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(maskParamValues);
+  if (typeof value === 'object') {
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = maskParamValues(value[key]);
+    return out;
+  }
+  return '***'; // 字符串/数字/布尔等叶子值统一脱敏
+}
+
 /**
  * 处理获取请求记录的请求
  * @returns {Response} 包含请求记录的响应
@@ -250,16 +273,23 @@ export function handleReqRecords() {
   let records = [...globals.reqRecords].reverse();
   const todayReqNum = globals.todayReqNum || 0;
   
-  // 检查当前 token 是否为 admin_token，如果不是则隐藏 IP 地址
+  // 非 admin token 时，对请求记录脱敏：IP / 接口查询值 / 请求体值
   if (globals.currentToken !== globals.adminToken) {
-    // 隐藏请求记录中的 IP 地址，将 IP 地址部分替换为相同长度的 *，但保留 .
     records = records.map(record => {
-      if (record.clientIp) {
-        // 将 IP 地址中的每个字符（除了 .）替换为 *
-        const maskedIp = record.clientIp.replace(/[^.]/g, '*');
-        return { ...record, clientIp: maskedIp };
+      const masked = { ...record };
+      if (masked.clientIp) {
+        // 沿用既有规则：IP 中除 . 外每个字符替换为 *
+        masked.clientIp = masked.clientIp.replace(/[^.]/g, '*');
       }
-      return record;
+      if (typeof masked.interface === 'string') {
+        // 隐藏接口查询串的值，保留路径与参数名
+        masked.interface = maskInterfaceValues(masked.interface);
+      }
+      if (masked.params != null) {
+        // 隐藏请求体的所有值，保留 key 与结构
+        masked.params = maskParamValues(masked.params);
+      }
+      return masked;
     });
   }
   

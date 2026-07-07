@@ -313,7 +313,7 @@ export default class RenrenSource extends BaseSource {
   async fetchStandardDanmu(url, headers, tierName) {
     try {
       // 中间节点执行快速失败策略，移除 retries 控制
-      const resp = await httpGet(url, { headers, validStatusCodes: [404] });
+      const resp = await httpGet(url, { headers, timeout: 5000, validStatusCodes: [404] });
 
       // 校验 404 特征：若返回特定错误文本，说明服务器正常响应但该集确实无弹幕数据
       if (resp.status === 404) {
@@ -341,7 +341,7 @@ export default class RenrenSource extends BaseSource {
     const u = updateQueryString(url, params);
     const resp = await httpGet(u, {
       headers: headers,
-      retries: 1, // 网页端为终极兜底链路，保留重试容错机制
+      timeout: 5000,
       validStatusCodes
     });
     return resp;
@@ -352,7 +352,7 @@ export default class RenrenSource extends BaseSource {
     const headers = this.buildSignedHeaders({ method, url, params, deviceId });
     const resp = await httpGet(url + "?" + sortedQueryString(params), {
       headers: headers,
-      retries: 1, // 网页端为终极兜底链路，保留重试容错机制
+      timeout: 5000,
     });
     return resp;
   }
@@ -387,7 +387,7 @@ export default class RenrenSource extends BaseSource {
 
       const url = `https://${this.API_CONFIG.TV_HOST}${path}?${queryString}`;
 
-      const resp = await httpGet(url, { headers });
+      const resp = await httpGet(url, { headers, timeout: 5000 });
 
       if (!resp.data || resp.data.code !== "0000") {
         log("info", `[Renren] TV搜索接口异常: code=${resp?.data?.code}, msg=${resp?.data?.msg}`);
@@ -398,8 +398,16 @@ export default class RenrenSource extends BaseSource {
 
       return list.map((item) => {
         let aliases = [];
-        if (item.highlights && item.highlights.alias) {
-          aliases = item.highlights.alias.split(',').map(s => s.trim().replace(/<[^>]+>/g, "")).filter(Boolean);
+        if (item.highlights) {
+          if (item.highlights.alias) {
+            aliases = item.highlights.alias.split(',').map(s => s.trim().replace(/<[^>]+>/g, "")).filter(Boolean);
+          }
+          if (item.highlights.original_name) {
+            const originalName = item.highlights.original_name.replace(/<[^>]+>/g, "").trim();
+            if (originalName && !aliases.includes(originalName)) {
+              aliases.push(originalName);
+            }
+          }
         }
         return {
           provider: "renren",
@@ -432,7 +440,7 @@ export default class RenrenSource extends BaseSource {
       const queryString = sortedQueryString(params);
       const url = `https://${this.API_CONFIG.MAC_HOST}${path}?${queryString}`;
 
-      const resp = await httpGet(url, { headers });
+      const resp = await httpGet(url, { headers, timeout: 5000 });
       if (!resp.data || resp.data.code !== "0000") {
         log("info", `[Renren] Mac端搜索接口异常: code=${resp?.data?.code}`);
         return null;
@@ -442,8 +450,16 @@ export default class RenrenSource extends BaseSource {
 
       return list.map(item => {
         let aliases = [];
-        if (item.highlights && item.highlights.alias) {
-          aliases = item.highlights.alias.split(',').map(s => s.trim().replace(/<[^>]+>/g, "")).filter(Boolean);
+        if (item.highlights) {
+          if (item.highlights.alias) {
+            aliases = item.highlights.alias.split(',').map(s => s.trim().replace(/<[^>]+>/g, "")).filter(Boolean);
+          }
+          if (item.highlights.original_name) {
+            const originalName = item.highlights.original_name.replace(/<[^>]+>/g, "").trim();
+            if (originalName && !aliases.includes(originalName)) {
+              aliases.push(originalName);
+            }
+          }
         }
         return {
           provider: "renren",
@@ -475,7 +491,7 @@ export default class RenrenSource extends BaseSource {
       const queryString = sortedQueryString(params);
       const headers = this.buildWinHeaders();
 
-      const resp = await httpGet(`${url}?${queryString}`, { headers });
+      const resp = await httpGet(`${url}?${queryString}`, { headers, timeout: 5000 });
       if (!resp.data || resp.data.code !== "0000") {
         log("info", `[Renren] Win端搜索接口异常: code=${resp?.data?.code}`);
         return null;
@@ -492,8 +508,16 @@ export default class RenrenSource extends BaseSource {
       // 数据模型装载器
       const processItem = (item) => {
         let aliases = [];
-        if (item.highlights && item.highlights.alias) {
-          aliases = item.highlights.alias.split(',').map(s => s.trim().replace(/<[^>]+>/g, "")).filter(Boolean);
+        if (item.highlights) {
+          if (item.highlights.alias) {
+            aliases = item.highlights.alias.split(',').map(s => s.trim().replace(/<[^>]+>/g, "")).filter(Boolean);
+          }
+          if (item.highlights.original_name) {
+            const originalName = item.highlights.original_name.replace(/<[^>]+>/g, "").trim();
+            if (originalName && !aliases.includes(originalName)) {
+              aliases.push(originalName);
+            }
+          }
         }
         return {
           provider: "renren",
@@ -565,8 +589,16 @@ export default class RenrenSource extends BaseSource {
 
       return list.map((item) => {
         let aliases = [];
-        if (item.highlights && item.highlights.alias) {
-          aliases = item.highlights.alias.split(',').map(s => s.trim().replace(/<[^>]+>/g, "")).filter(Boolean);
+        if (item.highlights) {
+          if (item.highlights.alias) {
+            aliases = item.highlights.alias.split(',').map(s => s.trim().replace(/<[^>]+>/g, "")).filter(Boolean);
+          }
+          if (item.highlights.original_name) {
+            const originalName = item.highlights.original_name.replace(/<[^>]+>/g, "").trim();
+            if (originalName && !aliases.includes(originalName)) {
+              aliases.push(originalName);
+            }
+          }
         }
         return {
           provider: "renren",
@@ -680,7 +712,8 @@ export default class RenrenSource extends BaseSource {
       const headers = this.generateTvHeaders(timestamp, sign);
 
       const resp = await httpGet(`https://${this.API_CONFIG.TV_HOST}${path}?${queryString}`, {
-        headers: headers
+        headers: headers,
+        timeout: 5000
       });
 
       // 1. 基础网络或数据校验
@@ -757,7 +790,7 @@ export default class RenrenSource extends BaseSource {
       // 请求发往目标网关
       const url = `https://${targetHost}${path}?${queryString}`;
 
-      const resp = await httpGet(url, { headers });
+      const resp = await httpGet(url, { headers, timeout: 5000 });
 
       // 1. 基础网络或数据校验
       if (!resp || !resp.data) {
@@ -1085,6 +1118,7 @@ export default class RenrenSource extends BaseSource {
 
       const resp = await httpGet(url, {
         headers: headers,
+        timeout: 5000,
         validStatusCodes: [404] 
       });
 

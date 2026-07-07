@@ -2,10 +2,10 @@ import BaseSource from './base.js';
 import { globals } from '../configs/globals.js';
 import { log } from "../utils/log-util.js";
 import { httpGet, httpGetWithStreamCheck } from "../utils/http-util.js";
-import { parseDanmakuBase64, md5, convertToAsciiSum } from "../utils/codec-util.js";
+import { parseDanmakuBase64, md5, convertToAsciiSum, decodeHtmlEntities } from "../utils/codec-util.js";
 import { generateValidStartDate } from "../utils/time-util.js";
 import { addAnime, removeEarliestAnime } from "../utils/cache-util.js";
-import { titleMatches, getExplicitSeasonNumber, extractSeasonNumberFromAnimeTitle } from "../utils/common-util.js";
+import { titleMatches, getExplicitSeasonNumber, extractSeasonNumberFromAnimeTitle, extractEpisodeNumberFromTitle } from "../utils/common-util.js";
 import { SegmentListResponse } from '../models/dandan-model.js';
 import { simplized } from "../utils/zh-util.js";
 import { getTmdbJaOriginalTitle, smartTitleReplace } from "../utils/tmdb-util.js";
@@ -197,23 +197,13 @@ export default class BilibiliSource extends BaseSource {
           // 忽略年份解析错误
         }
 
-        // 清理标题
-        const cleanedTitle = (item.title || "")
-          .replace(/<[^>]+>/g, '')  // 移除 HTML 标签
-          .replace(/&[^;]+;/g, match => {  // 解码 HTML 实体
-            const entities = { '&lt;': '<', '&gt;': '>', '&amp;': '&', '&quot;': '"', '&#39;': "'" };
-            return entities[match] || match;
-          })
+        // 清理标题，移除 HTML 标签并解码 HTML 实体
+        const cleanedTitle = decodeHtmlEntities((item.title || "").replace(/<[^>]+>/g, ''))
           .replace(/:/g, '：')
           .trim();
 
-		// 清洗原标题
-        const cleanedOrgTitle = (item.org_title || "")
-          .replace(/<[^>]+>/g, '')
-          .replace(/&[^;]+;/g, match => {
-            const entities = { '&lt;': '<', '&gt;': '>', '&amp;': '&', '&quot;': '"', '&#39;': "'" };
-            return entities[match] || match;
-          })
+        // 清洗原标题，移除 HTML 标签并解码 HTML 实体
+        const cleanedOrgTitle = decodeHtmlEntities((item.org_title || "").replace(/<[^>]+>/g, ''))
           .trim();
 
         const resultItem = {
@@ -291,7 +281,7 @@ export default class BilibiliSource extends BaseSource {
       localMatches = await searchBangumiData(keyword, [
         'bilibili', 'bilibili_hk_mo_tw', 'bilibili_hk_mo', 'bilibili_tw'
       ]);
-      log("info", `[Bilibili] Bangumi-Data 本地命中 ${localMatches.length} 条数据`);
+      log("info", `[Bilibili] Bangumi-Data 本地命中 ${localMatches.length} 条数据（检索词：${keyword}）`);
     }
 
     // 筛选出港澳台相关的本地匹配项
@@ -684,17 +674,19 @@ export default class BilibiliSource extends BaseSource {
                return {
                  name: realVal,
                  url: linkUrl,
-                 title: `【bilibili1】 ${displayTitle.trim()}`
+                 title: `【bilibili1】 ${displayTitle.trim()}`,
+                 _id: parseInt(epId, 10) || 0
                };
              });
 
-             // 按照提取出的 name (真实集号) 进行升序排列
-             links.sort((a, b) => {
-                  const numA = parseFloat(a.name);
-                  const numB = parseFloat(b.name);
-                  if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
-                  return 0;
-             });
+             // 优先从 index_title 提取集号排序，任一无法提取则退回到 ep_id 排序
+             const sortKeys = links.map(l => extractEpisodeNumberFromTitle(l.name));
+             if (sortKeys.every(k => k !== null)) {
+               links.forEach((l, i) => l._sortKey = sortKeys[i]);
+               links.sort((a, b) => a._sortKey - b._sortKey);
+             } else {
+               links.sort((a, b) => a._id - b._id);
+             }
 
              log("info", `[Bilibili] 直接使用搜索结果中的 ${links.length} 集分集`);
           } else {
@@ -712,9 +704,13 @@ export default class BilibiliSource extends BaseSource {
                 return {
                     name: `${index + 1}`,
                     url: linkUrl,
-                    title: `【bilibili1】 ${ep.title}`
+                    title: `【bilibili1】 ${ep.title}`,
+                    _id: parseInt(ep.id, 10) || 0
                 };
              });
+
+             // 依据底层数据主键 ep_id 进行时间序列升序排列
+             links.sort((a, b) => a._id - b._id);
           }
 
           if (links.length === 0) return;
@@ -1198,8 +1194,8 @@ export default class BilibiliSource extends BaseSource {
                     .map(i => ({
                         provider: "bilibili",
                         mediaId: i.season_id ? `ss${i.season_id}` : (i.uri.match(/season\/(\d+)/)?.[1] ? `ss${i.uri.match(/season\/(\d+)/)[1]}` : ""),
-                        title: (i.title||"").replace(/<[^>]+>/g,'').trim(),
-                        org_title: (i.org_title||"").replace(/<[^>]+>/g,'').trim(),
+                        title: decodeHtmlEntities((i.title||"").replace(/<[^>]+>/g,'')).trim(),
+                        org_title: decodeHtmlEntities((i.org_title||"").replace(/<[^>]+>/g,'')).trim(),
                         type: this._extractMediaType(i.season_type_name),
                         year: i.ptime ? new Date(i.ptime*1000).getFullYear() : null,
                         imageUrl: i.cover||i.pic||"",
@@ -1243,11 +1239,11 @@ export default class BilibiliSource extends BaseSource {
                 provider: "bilibili", 
                 mediaId: i.season_id ? `ss${i.season_id}` : "", 
                 mdId: i.media_id ? `md${i.media_id}` : null,
-                title: (i.title||"").replace(/<[^>]+>/g,'').trim(),
-                org_title: (i.org_title || "").replace(/<[^>]+>/g,'').replace(/&[^;]+;/g, match => { const entities = { '&lt;': '<', '&gt;': '>', '&amp;': '&', '&quot;': '"', '&#39;': "'" }; return entities[match] || match; }).trim(),
+                title: decodeHtmlEntities((i.title||"").replace(/<[^>]+>/g,'')).trim(),
+                org_title: decodeHtmlEntities((i.org_title || "").replace(/<[^>]+>/g,'')).trim(),
                 type: this._extractMediaType(i.season_type_name),
-				year: i.pubtime?new Date(i.pubtime*1000).getFullYear():null,
-				imageUrl: i.cover||null,
+                year: i.pubtime?new Date(i.pubtime*1000).getFullYear():null,
+                imageUrl: i.cover||null,
                 episodeCount: i.ep_size||0,
 				_eps: i.eps,
 				isOversea: true
