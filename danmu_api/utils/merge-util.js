@@ -1420,13 +1420,11 @@ function findBestAlignmentOffset(
             }
             // 匹配数量规模奖励（对齐对越多越可信）
             finalScore += Math.min(matchCount * 0.15, 1.5);
-            // 零偏移奖励：偏移为 0 说明主副源集数完全对齐，是最理想情况
+            // 零偏移奖励：主副源出现任意零差对集即表明集号一致，给予强信号
             const zeroDiffCount = numericDiffs.get('0.0000') || 0;
-            if (zeroDiffCount > 3) {
+            if (zeroDiffCount > 0) {
                 finalScore += MergeWeights.EP_ALIGN.ZERO_DIFF_BONUS_BASE;
                 finalScore += zeroDiffCount * MergeWeights.EP_ALIGN.ZERO_DIFF_BONUS_PER_HIT;
-            } else if (zeroDiffCount > 0) {
-                finalScore += zeroDiffCount * 2.0;
             }
             if (finalScore > maxScore) { maxScore = finalScore; bestOffset = offset; }
         }

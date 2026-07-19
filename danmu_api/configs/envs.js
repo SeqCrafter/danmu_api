@@ -345,7 +345,7 @@ export class Envs {
       
       // [3] 幕后/衍生/直播防御，保护: 幕后主谋, 番外地, 直播杀人/犯罪
       '(?<!(退居|回归|走向|转战|隐身|藏身|的))幕后(?!(主谋|主使|黑手|真凶|玩家|老板|金主|英雄|功臣|推手|大佬|操纵|交易|策划|博弈|BOSS|真相))(故事|花絮|独家)?|' +
-      '衍生(?!(品|物|兽))|番外(?!(地|人))|直播(陪看|回顾)?|直播(?!(.*(事件|杀人|自杀|谋杀|犯罪|现场|游戏|挑战)))|' +
+      '衍生(?!(品|物|兽))|番外(?!(地|人))|直播(陪看|回顾)|' +
       '未播(片段)?|会员(专享|加长|尊享|专属|版)?|' +
       
       // [4] 解读/回顾/盘点防御，保护: 生命精华, 案情回顾, 财务盘点, 新闻发布会
@@ -534,6 +534,30 @@ export class Envs {
   }
 
   /**
+   * 解析剧名杂音清理规则
+   * 移除搜索关键词和源标题中的画质/配音/版本等杂音词。
+   * 支持完全自定义的正则表达式，默认为同时匹配中英文括号的常用杂音词。
+   * 未设置时使用默认规则，设为空值可禁用。
+   * @returns {RegExp|null} 全局正则，显式设为空时返回 null（禁用）
+   */
+  static resolveTitleNoiseFilter() {
+    const defaultPattern = '[（(](?:臻彩|真彩|高清|标清|超清|国配|中配|日配|粤语|原声|台配|无修|未删减|完整版)[）)]';
+    const raw = this.get('TITLE_NOISE_FILTER', '', 'string').trim();
+    const hasKey = (this.env && 'TITLE_NOISE_FILTER' in this.env)
+                || (typeof process !== 'undefined' && 'TITLE_NOISE_FILTER' in process.env);
+
+    if (!raw) {
+      if (hasKey) { this.accessedEnvVars.set('TITLE_NOISE_FILTER', ''); return null; }
+      this.accessedEnvVars.set('TITLE_NOISE_FILTER', defaultPattern);
+    } else {
+      this.accessedEnvVars.set('TITLE_NOISE_FILTER', raw);
+    }
+
+    try { return new RegExp(raw || defaultPattern, 'gi'); }
+    catch (e) { console.warn('Invalid TITLE_NOISE_FILTER regex, using default.'); try { return new RegExp(defaultPattern, 'gi'); } catch (e2) { return null; } }
+  }
+
+  /**
    * 获取记录的原始环境变量 JSON
    * @returns {Map<any, any>} JSON 字符串
    */
@@ -613,6 +637,7 @@ export class Envs {
       'TITLE_TO_CHINESE': { category: 'match', type: 'boolean', description: '外语标题转换中文开关' },
       'ANIME_TITLE_SIMPLIFIED': { category: 'match', type: 'boolean', description: '搜索的剧名标题自动繁转简' },
       'TITLE_MAPPING_TABLE': { category: 'match', type: 'map', description: '剧名映射表，用于自动匹配时替换标题进行搜索，格式：原始标题->映射标题;原始标题->映射标题;... ，例如："唐朝诡事录->唐朝诡事录之西行;国色芳华->锦绣芳华"' },
+      'TITLE_NOISE_FILTER': { category: 'match', type: 'text', description: '剧名杂音清理规则，按正则表达式清理搜索与匹配阶段的剧名杂音词（如`百花杀（真彩）`→`百花杀`）。默认值：[（(](?:臻彩|真彩|高清|标清|超清|国配|中配|日配|粤语|原声|台配|无修|未删减|完整版)[）)]，中英文括号均匹配。设为空值可禁用' },
       'AI_BASE_URL': { category: 'match', type: 'text', description: 'AI服务基础URL，不填默认为https://api.openai.com/v1' },
       'AI_MODEL': { category: 'match', type: 'text', description: 'AI模型名称，不填默认为gpt-4o' },
       'AI_API_KEY': { category: 'match', type: 'text', description: 'AI服务API密钥，默认为空，需手动填写' },
@@ -673,6 +698,7 @@ export class Envs {
       platformOrderArr: this.resolvePlatformOrder(), // 自动匹配优选平台
       animeTitleFilter: this.resolveAnimeTitleFilter(), // 剧名正则过滤
       episodeTitleFilter: this.resolveEpisodeTitleFilter(), // 剧集标题正则过滤
+      titleNoiseFilter: this.resolveTitleNoiseFilter(), // 剧名杂音清理规则
       blockedWords: this.get('BLOCKED_WORDS', '', 'string'), // 屏蔽词列表
       groupMinute: Math.min(this.get('GROUP_MINUTE', 1, 'number'), 30), // 分钟内合并去重（默认 1，最大值30，0表示不去重）
       danmuLimit: this.get('DANMU_LIMIT', 0, 'number'), // 等间隔采样限制弹幕总数，单位为k，即千：默认 0，表示不限制弹幕数，若改为5，弹幕总数在超过5000的情况下会将弹幕数控制在5000

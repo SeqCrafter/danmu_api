@@ -264,35 +264,54 @@ export function getExplicitSeasonNumber(text) {
  * @returns {boolean} 是否匹配
  */
 export function titleMatches(title, query, parsedSeason = null) {
+  if (title == null || query == null) return false;
+
+  const titleText = String(title);
+  const queryText = String(query);
+  if (!titleText || !queryText) return false;
+
   // 策略1：严格模式仅允许头部或完全匹配
-  if (globals.strictTitleMatch) return strictTitleMatch(title, query);
+  if (globals.strictTitleMatch) return strictTitleMatch(titleText, queryText);
+
+  // 剧名杂音清理：移除画质/配音/版本等杂音词，避免阻塞匹配
+  const tagFilter = globals.titleNoiseFilter || null;
+  const cleanTitle = tagFilter ? titleText.replace(tagFilter, '').trim() : titleText;
 
   // 预处理：移除干扰字符并转小写，消除格式与大小写差异
-  const t = normalizeSpaces(title).toLowerCase();
-  const q = normalizeSpaces(query).toLowerCase();
+  const t = normalizeSpaces(cleanTitle).toLowerCase();
+  const q = normalizeSpaces(queryText).toLowerCase();
 
   // 预处理：构建搜索词变种池 (原词、简体、繁体)，利用 Set 去重
   let qList = [q];
   try {
-    qList = [...new Set([query, simplized(query), traditionalized(query)])]
+    qList = [...new Set([queryText, simplized(queryText), traditionalized(queryText)])]
       .map(kw => normalizeSpaces(kw).toLowerCase()).filter(Boolean);
   } catch (e) {}
 
   // 季度特征提取：提前提取季数以支撑策略2的去季包含匹配
-  const querySeason = parsedSeason !== null ? parsedSeason : getExplicitSeasonNumber(query);
+  const querySeason = parsedSeason !== null ? parsedSeason : getExplicitSeasonNumber(queryText);
 
   // 查询词含季号时，将去季后的干净查询词加入候选池
   // 避免如"间谍过家家 第一季"因"第一季"三字不存在于源标题而导致包含匹配失败
   if (querySeason !== null && parsedSeason === null) {
-    const seasonStripped = query.replace(/(?:season|s|第)\s*[0-9一二三四五六七八九十]+\s*(?:季|期|部(?!分))?/gi, '').trim();
-    if (seasonStripped && seasonStripped !== query) {
+    const seasonStripped = queryText.replace(/(?:season|s|第)\s*[0-9一二三四五六七八九十]+\s*(?:季|期|部(?!分))?/gi, '').trim();
+    if (seasonStripped && seasonStripped !== queryText) {
       qList = [...new Set([...qList, normalizeSpaces(seasonStripped).toLowerCase()])];
+    }
+  }
+
+  // 查询词含杂音词时，将清理后的干净查询词加入候选池
+  // 如"百花杀（真彩）"→ 追加"百花杀"，避免"真彩"二字导致包含匹配失败
+  if (tagFilter) {
+    const tagStripped = queryText.replace(tagFilter, '').trim();
+    if (tagStripped && tagStripped !== queryText) {
+      qList = [...new Set([...qList, normalizeSpaces(tagStripped).toLowerCase()])];
     }
   }
 
   // 季度特征校验：先于包含匹配执行，确保错误季度的标题不会因干净查询词误通过
   if (querySeason !== null) {
-    const titleSeason = getExplicitSeasonNumber(title);
+    const titleSeason = getExplicitSeasonNumber(titleText);
 
     if (querySeason > 1) {
       // 搜索指定续作(>1)时，标题必须明确包含该季度标识
@@ -307,7 +326,7 @@ export function titleMatches(title, query, parsedSeason = null) {
   if (qList.some(kw => t.includes(kw))) return true;
 
   // 策略3：相似度匹配 (阈值0.8)
-  return qList.some(kw => {
+  const simMatch = qList.some(kw => {
     // 长度差异过大，或纯英文/数字时，禁止使用相似度计算策略
     if (Math.abs(t.length - kw.length) > Math.max(t.length, kw.length) * 0.7 || /^[a-zA-Z0-9]+$/.test(kw)) {
       return false;
@@ -327,6 +346,22 @@ export function titleMatches(title, query, parsedSeason = null) {
 
     return (matchCount / kw.length) > 0.8;
   });
+
+  // 年份噪音兜底：前序策略均未命中时，尝试去年份后再次包含匹配
+  // 如查询词含杂音年份"(2026)"但源标题不含，去年后可正常命中
+  if (!simMatch) {
+    const yearStripped = queryText.replace(/[\(\（]\s*(?:19|20)\d{2}\s*[\)\）]|\b(?:19|20)\d{2}\b/g, '').trim();
+    if (yearStripped && yearStripped !== queryText) {
+      // 去年份后可能残留杂音词，继续用配置的正则去除
+      const cleanYear = tagFilter ? yearStripped.replace(tagFilter, '').trim() : yearStripped;
+      const yearQ = normalizeSpaces(cleanYear).toLowerCase();
+      // 仅当标题不含年份时才接受兜底，保留用户刻意用年份过滤的语义
+      const titleHasYear = /[\(\（]\s*(?:19|20)\d{2}\s*[\)\）]|\b(?:19|20)\d{2}\b/.test(titleText);
+      if (yearQ && t.includes(yearQ) && !titleHasYear) return true;
+    }
+  }
+
+  return false;
 }
 
 /**
