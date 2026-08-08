@@ -106,7 +106,9 @@ document.addEventListener('DOMContentLoaded', createCustomAlert);
 // 数据存储
 let envVariables = {};
 let currentCategory = 'api'; // 默认分类改为api
+let envSearchQuery = '';
 let editingKey = null;
+let editingCategory = null;
 let logs = []; // 保留本地日志数组，用于UI显示
 
 // 版本信息
@@ -180,6 +182,8 @@ function loadEnvVariables() {
             
             // 使用从API获取的原始环境变量，用于系统设置
             const originalEnvVars = config.originalEnvVars || {};
+            // 浏览器偏好覆盖部署环境变量；云函数更新变量通常要等重新部署后才会进入新实例。
+            applyTheme(getStoredTheme() || originalEnvVars.UI_THEME || document.body.dataset.theme || 'ocean');
             
             // 重新组织数据结构以适配现有UI
             envVariables = {};
@@ -481,18 +485,42 @@ function switchSection(section, event = null) {
 }
 
 // 切换类别
-function switchCategory(category, event = null) {
+function switchCategory(category) {
     currentCategory = category;
-    document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
-    if (event && event.target) {
-        event.target.classList.add('active');
-    }
+    clearEnvSearch(false);
     renderEnvList();
+}
+
+let modalPageScrollTop = 0;
+
+function lockPageScroll() {
+    if (document.body.classList.contains('modal-open')) {
+        return;
+    }
+
+    modalPageScrollTop = window.scrollY || document.documentElement.scrollTop;
+    document.documentElement.classList.add('modal-open');
+    document.body.classList.add('modal-open');
+    document.body.style.top = \`-\${modalPageScrollTop}px\`;
+}
+
+function unlockPageScroll() {
+    if (!document.body.classList.contains('modal-open')) {
+        return;
+    }
+
+    document.documentElement.classList.remove('modal-open');
+    document.body.classList.remove('modal-open');
+    document.body.style.top = '';
+    window.scrollTo(0, modalPageScrollTop);
 }
 
 // 关闭模态框
 function closeModal() {
     document.getElementById('env-modal').classList.remove('active');
+    unlockPageScroll();
+    editingKey = null;
+    editingCategory = null;
     
     // 重置表单字段状态
     document.getElementById('env-category').disabled = false;

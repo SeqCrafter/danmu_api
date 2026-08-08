@@ -84,6 +84,22 @@ export function postProcessDanmu(danmuData) {
   };
 }
 
+// 豆瓣接口专用的 JSON 输出适配。保持在定制模块内，避免影响上游的通用弹幕格式化逻辑。
+export async function formatDoubanDanmuResponse(response, queryFormat) {
+  const format = (queryFormat || globals.danmuOutputFormat || "json").toLowerCase();
+  if (format !== "json" || !response.ok) {
+    return response;
+  }
+
+  try {
+    const danmuData = await response.clone().json();
+    return jsonResponse(postProcessDanmu(danmuData), response.status);
+  } catch (error) {
+    log("warn", `Failed to post-process douban danmu response: ${error.message}`);
+    return response;
+  }
+}
+
 // 根据集数匹配episode（优先使用集标题中的集数，其次使用episodeNumber，最后使用数组索引）
 function findEpisodeByNumber(filteredEpisodes, targetEpisode, platform = null) {
   if (!filteredEpisodes || filteredEpisodes.length === 0) {
@@ -405,8 +421,9 @@ export async function getAnimeByDouban(url) {
 
   log("info", `Found URL for episodeId ${episodeId}: ${videoUrl}`);
 
-  // 直接调用 getCommentByUrl 获取弹幕
-  // getCommentByUrl 内部会处理缓存检查和弹幕获取
+  // getCommentByUrl 内部会处理缓存检查和弹幕获取。
+  // 仅在豆瓣接口内转换 JSON 输出，不修改上游通用格式化函数。
   log("info", `Fetching comments from URL: ${videoUrl}`);
-  return await getCommentByUrl(videoUrl, queryFormat, segmentFlag);
+  const response = await getCommentByUrl(videoUrl, queryFormat, segmentFlag);
+  return formatDoubanDanmuResponse(response, queryFormat);
 }

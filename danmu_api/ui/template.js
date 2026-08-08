@@ -3,6 +3,7 @@ import { baseCssContent } from "./css/base.css.js";
 import { componentsCssContent } from "./css/components.css.js";
 import { formsCssContent } from "./css/forms.css.js";
 import { responsiveCssContent } from "./css/responsive.css.js";
+import { themesCssContent } from "./css/themes.css.js";
 import { mainJsContent } from "./js/main.js";
 import { previewJsContent } from "./js/preview.js";
 import { logviewJsContent } from "./js/logview.js";
@@ -25,9 +26,19 @@ export const HTML_TEMPLATE = /* html */ `
     <style>${componentsCssContent}</style>
     <style>${formsCssContent}</style>
     <style>${responsiveCssContent}</style>
+    <style>${themesCssContent}</style>
     
 </head>
-<body>
+<body data-theme="globals.uiTheme">
+    <script>
+        try {
+            const storedTheme = localStorage.getItem('logvar_ui_theme');
+            const supportedThemes = ['ocean', 'forest', 'graphite', 'berry', 'monochrome', 'sunset', 'aurora', 'mist', 'terminal', 'lavender'];
+            if (supportedThemes.includes(storedTheme)) document.body.dataset.theme = storedTheme;
+        } catch (error) {
+            // localStorage may be unavailable in restricted browser contexts.
+        }
+    </script>
     <div class="container">
         <!-- 进度条 -->
         <div class="progress-container" id="progress-container">
@@ -77,8 +88,33 @@ export const HTML_TEMPLATE = /* html */ `
                     <p style="color: #666; font-size: 12px; margin-top: 5px;">* 设置将保存在浏览器本地存储中，清除网页的‘本地存储空间’或者输入框中留空并保存可恢复默认</p>
                 </div>
 
-                <p style="color: #666; margin-bottom: 20px;">当前生效的环境变量配置</p>
-                <div class="preview-area" id="preview-area"></div>
+                <p class="preview-description">当前生效的环境变量配置</p>
+                <div class="preview-toolbar">
+                    <nav class="preview-categories" id="preview-categories" aria-label="配置分类"></nav>
+                    <div class="preview-search">
+                        <input
+                            type="text"
+                            id="preview-search-input"
+                            placeholder="搜索键名、值或说明"
+                            aria-label="搜索配置"
+                            autocomplete="off"
+                            oninput="handlePreviewSearch(event)"
+                        >
+                        <button
+                            type="button"
+                            class="preview-search-clear"
+                            id="preview-search-clear"
+                            onclick="clearPreviewSearch()"
+                            title="清除搜索"
+                            aria-label="清除搜索"
+                            hidden
+                        >&times;</button>
+                    </div>
+                </div>
+                <div class="preview-status" id="preview-status" aria-live="polite"></div>
+                <div class="preview-area" id="preview-area" aria-live="polite">
+                    <p class="text-gray">正在加载配置...</p>
+                </div>
             </div>
 
             <!-- 日志查看 -->
@@ -198,12 +234,19 @@ export const HTML_TEMPLATE = /* html */ `
 
             <!-- 系统配置 -->
             <div class="section" id="env-section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+                <div class="env-section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
                     <div>
                         <h2 style="margin: 0;">环境变量配置</h2>
                         <p style="margin: 5px 0 0 0; color: #666; font-size: 0.9em;">vercel/netlify/edgeone平台修改变量后需要重新部署</p>
-                    </div>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                </div>
+                <div class="env-toolbar-actions" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="btn btn-primary config-transfer-btn" onclick="exportSystemConfig()" title="下载当前环境变量配置文件">
+                        <span class="config-transfer-icon" aria-hidden="true">📤</span> 导出配置
+                    </button>
+                    <button class="btn btn-primary config-transfer-btn" onclick="triggerConfigImport()" title="上传 JSON 文件并导入环境变量配置">
+                        <span class="config-transfer-icon" aria-hidden="true">📥</span> 导入配置
+                    </button>
+                    <input type="file" id="config-import-file" accept=".json,application/json" style="display: none;" onchange="importSystemConfigFile(this.files[0])">
                     <button class="btn btn-danger" onclick="showClearCacheModal()" title="清理系统缓存">
                         🗑️ 清理缓存
                     </button>
@@ -267,13 +310,67 @@ export const HTML_TEMPLATE = /* html */ `
                 </div>
                 </div>
 
-                <div class="env-categories">
-                    <button class="category-btn active" onclick="switchCategory('api', event)">🔗 API配置</button>
-                    <button class="category-btn" onclick="switchCategory('source', event)">📜 源配置</button>
-                    <button class="category-btn" onclick="switchCategory('match', event)">🔍 匹配配置</button>
-                    <button class="category-btn" onclick="switchCategory('danmu', event)">🔣 弹幕配置</button>
-                    <button class="category-btn" onclick="switchCategory('cache', event)">💾 缓存配置</button>
-                    <button class="category-btn" onclick="switchCategory('system', event)">⚙️ 系统配置</button>
+                <div class="preview-toolbar env-config-toolbar">
+                    <nav class="preview-categories" id="env-categories" aria-label="系统配置分类"></nav>
+                    <div class="preview-search">
+                        <input
+                            type="text"
+                            id="env-search-input"
+                            placeholder="搜索键名、值或说明"
+                            aria-label="搜索系统配置"
+                            autocomplete="off"
+                            oninput="handleEnvSearch(event)"
+                        >
+                        <button
+                            type="button"
+                            class="preview-search-clear"
+                            id="env-search-clear"
+                            onclick="clearEnvSearch()"
+                            title="清除搜索"
+                            aria-label="清除搜索"
+                            hidden
+                        >&times;</button>
+                    </div>
+                </div>
+                <div class="preview-status" id="env-search-status" aria-live="polite"></div>
+
+                <div class="theme-settings" id="theme-settings" hidden>
+                    <div class="theme-settings-copy">
+                        <h3>界面主题</h3>
+                        <span class="theme-current-label" id="theme-current-label">UI_THEME · 海湾蓝</span>
+                    </div>
+                    <div class="theme-options" role="radiogroup" aria-label="界面主题选择">
+                        <button type="button" role="radio" class="theme-option" data-theme-option="ocean" aria-checked="false" onclick="selectTheme('ocean')" title="海湾蓝">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background: #145b6f"></i><i style="background: #159b8f"></i><i style="background: #dfe9f1"></i></span><span class="theme-option-label">海湾蓝</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="forest" aria-checked="false" onclick="selectTheme('forest')" title="森林绿">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background: #245c45"></i><i style="background: #b36a3c"></i><i style="background: #e5eee8"></i></span><span class="theme-option-label">森林绿</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="graphite" aria-checked="false" onclick="selectTheme('graphite')" title="石墨夜">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background: #0e1115"></i><i style="background: #55b8c9"></i><i style="background: #20242a"></i></span><span class="theme-option-label">石墨夜</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="berry" aria-checked="false" onclick="selectTheme('berry')" title="莓果红">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background: #702846"></i><i style="background: #315b8a"></i><i style="background: #f1e5eb"></i></span><span class="theme-option-label">莓果红</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="monochrome" aria-checked="false" onclick="selectTheme('monochrome')" title="黑白简约">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background: #111111"></i><i style="background: #767676"></i><i style="background: #f2f2f2"></i></span><span class="theme-option-label">黑白简约</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="sunset" aria-checked="false" onclick="selectTheme('sunset')" title="暖霞橙">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background: #4d344b"></i><i style="background: #b54132"></i><i style="background: #ebeef2"></i></span><span class="theme-option-label">暖霞橙</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="aurora" aria-checked="false" onclick="selectTheme('aurora')" title="极光青">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background: #164a4a"></i><i style="background: #d49a3a"></i><i style="background: #dfe8e6"></i></span><span class="theme-option-label">极光青</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="mist" aria-checked="false" onclick="selectTheme('mist')" title="晨雾灰">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background: #40566b"></i><i style="background: #a94f42"></i><i style="background: #e7ebef"></i></span><span class="theme-option-label">晨雾灰</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="terminal" aria-checked="false" onclick="selectTheme('terminal')" title="终端绿">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background: #050706"></i><i style="background: #4faf75"></i><i style="background: #1d231f"></i></span><span class="theme-option-label">终端绿</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="lavender" aria-checked="false" onclick="selectTheme('lavender')" title="经典默认">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background: #1a2980"></i><i style="background: #26d0ce"></i><i style="background: #a0b9e8"></i></span><span class="theme-option-label">经典默认</span>
+                        </button>
+                    </div>
                 </div>
 
                 <div class="env-list" id="env-list"></div>
@@ -342,7 +439,7 @@ export const HTML_TEMPLATE = /* html */ `
     <!-- 项目声明 -->
     <footer class="footer">
         <p class="footer-text">
-            一个人人都能部署的基于 js 的弹幕 API 服务器，支持爱优腾芒哔咪人韩巴狐乐西埋帆弹幕直接获取，兼容弹弹play的搜索、详情查询和弹幕获取接口规范，并提供日志记录，支持vercel/netlify/edgeone/cloudflare/docker/hf等部署方式，不用提前下载弹幕，没有nas或小鸡也能一键部署。
+            一个人人都能部署的基于 js 的弹幕 API 服务器，支持爱优腾芒哔咪人韩巴狐乐西埋帆红弹幕直接获取，兼容弹弹play的搜索、详情查询和弹幕获取接口规范，并提供日志记录，支持vercel/netlify/edgeone/cloudflare/docker/hf等部署方式，不用提前下载弹幕，没有nas或小鸡也能一键部署。
         </p>
         <p class="footer-text">本项目仅为个人学习爱好开发，代码开源。如有任何侵权行为，请联系本人删除。</p>
         <p class="footer-text">本项目完全免费，不收取任何费用，请勿上当受骗。</p>
