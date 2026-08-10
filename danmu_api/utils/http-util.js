@@ -5,6 +5,13 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // 跨异步生命周期链路的日志上下文追踪器
 export const sourceLogContext = new AsyncLocalStorage();
 
+// 单次搜索请求内的 HTTP 响应复用缓存: 相同 URL 的重复 GET 直接复用, 借助 AsyncLocalStorage 实现请求级隔离
+export const httpCacheContext = new AsyncLocalStorage();
+
+export function runWithHttpCache(fn) {
+  return httpCacheContext.run(new Map(), fn);
+}
+
 // 源调度键名（sourceOrderArr）到日志标签规范名称的映射
 // sourceOrderArr 中部分键名与对应源文件的标签命名不一致（如 360→360kan, imgo→mango）
 // 此映射表统一转换，确保 HTTP 日志标签与源文件内部标签一致
@@ -53,6 +60,16 @@ function linkSignal(externalSignal, internalController) {
 }
 
 export async function httpGet(url, options = {}) {
+  // 单次搜索请求内 HTTP 响应复用: 若当前请求上下文已激活复用缓存且本 URL 已缓存, 直接返回克隆结果, 跳过重复网络请求
+  const requestHttpCache = httpCacheContext.getStore();
+  // 重试调用传入 bypassCache 时跳过复用，避免复用首次已缓存的失败响应而令重试被静默吞掉
+  const bypassCache = options.bypassCache === true;
+  if (requestHttpCache && !bypassCache && requestHttpCache.has(url)) {
+    const cached = requestHttpCache.get(url);
+    log("info", `[${sourceLogContext.getStore() || 'system'}] [请求复用] 复用请求内已缓存的 HTTP 响应, 跳过重复请求: ${url}`);
+    return { data: structuredClone(cached.data), status: cached.status, headers: { ...cached.headers } };
+  }
+
   // 从 options 中获取重试次数，默认为 0
   const maxRetries = parseInt(options.retries || '0', 10) || 0;
   // 提取允许放行的特定状态码白名单
@@ -203,6 +220,11 @@ export async function httpGet(url, options = {}) {
       // 请求成功，返回结果
       if (attempt > 0) {
         log("info", `[${currentSource}] [请求模拟] 重试成功`);
+      }
+
+      // 将本次响应记入请求内复用缓存, 供同请求内相同 URL 的后续请求直接复用
+      if (requestHttpCache && !bypassCache) {
+        requestHttpCache.set(url, { data: structuredClone(parsedData), status: response.status, headers });
       }
 
       // 模拟 iOS 环境：返回 { data: ... } 结构

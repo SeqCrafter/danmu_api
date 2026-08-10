@@ -1,12 +1,13 @@
 import { Globals } from './configs/globals.js';
 import { jsonResponse } from './utils/http-util.js';
 import { log, formatLogMessage } from './utils/log-util.js'
-import { getRedisCaches, judgeRedisValid } from "./utils/redis-util.js";
+import { getFavoriteCachesFromRedis, getRedisCaches, judgeRedisValid } from "./utils/redis-util.js";
 import { cleanupExpiredIPs, findUrlById, getCommentCache, getLocalCaches, judgeLocalCacheValid } from "./utils/cache-util.js";
 import { formatDanmuResponse } from "./utils/danmu-util.js";
 import AIClient from './utils/ai-util.js';
 import { initBangumiData } from "./utils/bangumi-data-util.js";
 import { getBangumi, getComment, getCommentByUrl, getSegmentComment, matchAnime, searchAnime, searchEpisodes } from "./apis/dandan-api.js";
+import { handleFavoriteAdd, handleFavoriteList, handleFavoriteRefresh, handleFavoriteRemove, handleFavoriteSchedule } from "./apis/favorite-api.js";
 import { getFongmiDanmaku } from "./apis/clients/fongmi-api.js";
 import { handleConfig, handleUI, handleLogs, handleClearLogs, handleDeploy, handleClearCache, handleReqRecords, handleCacheAnimes } from "./apis/system-api.js";
 import { handleForwardTrace } from "./apis/forward-trace-api.js";
@@ -77,7 +78,7 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
   // --- 校验 token ---
   const parts = path.split("/").filter(Boolean); // 去掉空段
 
-  const knownApiPaths = ["api", "v1", "v2", "search", "match", "bangumi", "comment", "danmaku"];
+  const knownApiPaths = ["api", "v1", "v2", "search", "match", "favorite", "bangumi", "comment", "danmaku"];
 
   const firstPart = parts[0] || "";
   const isDefaultToken = globals.token === "87654321";
@@ -95,6 +96,10 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
   if (globals.redisValid && path !== "/favicon.ico" && path !== "/robots.txt") {
     await getRedisCaches();
   }
+  // serverless 多实例下，收藏请求每次都从 Redis 刷新收藏缓存，避免读到预热实例的过期空快照
+  if (globals.redisValid && deployPlatform !== "node" && path.includes("/favorite")) {
+    await getFavoriteCachesFromRedis();
+  }
   if (deployPlatform === "node" && globals.localRedisValid && path !== "/favicon.ico" && path !== "/robots.txt") {
     const { getLocalRedisCaches } = await import("./utils/local-redis-util.js");
     await getLocalRedisCaches();
@@ -104,6 +109,7 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
   const targetPaths = [
     '/api/v2/search/anime',
     '/api/v2/match',
+    '/api/v2/favorite',
     '/api/v2/search/episodes',
     '/api/v2/fongmi/danmaku',
     '/danmaku',
@@ -258,6 +264,7 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
   if (path !== "/" && path !== "/danmaku" && path !== "/api/logs" && !path.startsWith('/api/env') 
     && !path.startsWith('/api/deploy') && !path.startsWith('/api/cache')
     && !path.startsWith('/api/cookie') && !path.startsWith('/api/config')
+    && !path.startsWith('/api/favorite')
     && !path.startsWith('/api/ai') && !path.startsWith('/api/debug')) {
       log("info", `[system] [path check] Starting path normalization for: "${path}"`);
       const pathBeforeCleanup = path; // 保存清理前的路径检查是否修改
@@ -282,6 +289,7 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
       if (!path.startsWith('/api/v2') && path !== '/' && !path.startsWith('/api/logs') 
         && !path.startsWith('/api/env') && !path.startsWith('/api/cache')
         && !path.startsWith('/api/cookie') && !path.startsWith('/api/config')
+        && !path.startsWith('/api/favorite')
         && !path.startsWith('/api/ai') && !path.startsWith('/api/debug')) {
           if (path.startsWith('/v2/') || path === '/v2') {
               log("info", `[system] [path check] Path is missing /api prefix. Adding /api...`);
@@ -335,6 +343,31 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
   if (path === "/api/v2/match" && method === "POST") {
     return matchAnime(url, req, clientIp);
   }
+  // POST /api/v2/favorite/add - 收藏剧集（永久缓存）
+  if ((path === "/api/v2/favorite/add" || path === "/api/favorite/add") && method === "POST") {
+    return handleFavoriteAdd(req, url);
+  }
+
+  // POST /api/v2/favorite/refresh - 刷新收藏缓存
+  if ((path === "/api/v2/favorite/refresh" || path === "/api/favorite/refresh") && method === "POST") {
+    return handleFavoriteRefresh(req, url);
+  }
+
+  // POST /api/v2/favorite/schedule - 设置或关闭定时刷新
+  if ((path === "/api/v2/favorite/schedule" || path === "/api/favorite/schedule") && method === "POST") {
+    return handleFavoriteSchedule(req);
+  }
+
+  // POST /api/v2/favorite/remove - 删除收藏
+  if ((path === "/api/v2/favorite/remove" || path === "/api/favorite/remove") && method === "POST") {
+    return handleFavoriteRemove(req);
+  }
+
+  // GET /api/v2/favorite/list - 收藏列表
+  if ((path === "/api/v2/favorite/list" || path === "/api/favorite/list") && method === "GET") {
+    return handleFavoriteList();
+  }
+
 
   // GET /api/v2/bangumi/:animeId
   if (path.startsWith("/api/v2/bangumi/") && method === "GET") {

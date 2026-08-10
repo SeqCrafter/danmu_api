@@ -13,7 +13,7 @@ export const Globals = {
   accessedEnvVars: {},
 
   // 静态常量
-  VERSION: '1.20.3',
+  VERSION: '1.20.5',
   MAX_LOGS: 1000, // 日志存储，最多保存 1000 行
   MAX_RECORDS: 100, // 请求记录最大数量
 
@@ -38,10 +38,12 @@ export const Globals = {
     episodeNum: null,
     lastSelectMap: null,
     reqRecords: null,
-    todayReqNum: null
+    todayReqNum: null,
+    favoriteCache: null
   },
   searchCache: new Map(), // 搜索结果缓存，存储格式：{ keyword: { results, timestamp } }
   commentCache: new Map(), // 弹幕缓存，存储格式：{ videoUrl: { comments, timestamp } }
+  favoriteCache: new Map(), // 收藏剧集永久缓存，存储格式：{ keyword: { results, details, timestamp } }，无 TTL、无数量上限
   deployPlatform: '', // 部署平台配置
   currentToken: '', // 标识当前可用token
 

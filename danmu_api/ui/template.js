@@ -19,6 +19,8 @@ export const HTML_TEMPLATE = /* html */ `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="darkreader-lock">
+    <meta name="color-scheme" content="light dark">
     <title>LogVar弹幕API</title>
     <link rel="icon" type="image/jpg" href="https://i.mji.rip/2025/09/27/eedc7b701c0fa5c1f7c175b22f441ad9.jpeg">
     <link rel="apple-touch-icon" href="https://i.mji.rip/2025/09/27/eedc7b701c0fa5c1f7c175b22f441ad9.jpeg">
@@ -32,14 +34,20 @@ export const HTML_TEMPLATE = /* html */ `
 <body data-theme="globals.uiTheme">
     <script>
         try {
-            const storedTheme = localStorage.getItem('logvar_ui_theme');
-            const supportedThemes = ['ocean', 'forest', 'graphite', 'berry', 'monochrome', 'sunset', 'aurora', 'mist', 'terminal', 'lavender'];
-            if (supportedThemes.includes(storedTheme)) document.body.dataset.theme = storedTheme;
+            var storedTheme = localStorage.getItem('logvar_ui_theme');
+            var validThemes = ['lavender','shinyo','sakura','tianyi','hatsune','sakuragi','violet','amber'];
+            if (validThemes.indexOf(storedTheme) !== -1) { document.body.dataset.theme = storedTheme; }
+            var storedScheme = localStorage.getItem('logvar_ui_color_scheme');
+            if (storedScheme === 'dark' || storedScheme === 'light') {
+                document.body.dataset.colorScheme = storedScheme;
+            }
         } catch (error) {
             // localStorage may be unavailable in restricted browser contexts.
         }
     </script>
     <div class="container">
+        <div class="corner-fold"></div>
+        <button class="theme-corner-toggle" id="theme-corner-toggle" onclick="toggleColorScheme()" title="切换明暗模式" aria-label="切换明暗模式">🌙</button>
         <!-- 进度条 -->
         <div class="progress-container" id="progress-container">
             <div class="progress-bar" id="progress-bar"></div>
@@ -53,11 +61,11 @@ export const HTML_TEMPLATE = /* html */ `
                 </div>
                 <div class="version-info">
                     <span class="version-badge">当前版本: <span id="current-version">v${globals.version}</span></span>
-                    <span class="update-badge" id="update-badge">
+                    <a class="update-badge" id="update-badge" href="https://t.me/s/logvar_danmu_channel" target="_blank" rel="noopener" title="查看更新通知">
                         🎉 最新版本: <span id="latest-version">加载中...</span>
-                    </span>
-                    <span class="api-endpoint-badge">
-                        API端点: <span id="api-endpoint" title="点击复制API端点" style="cursor: pointer; color: #4CAF50; font-weight: bold;" onclick="copyApiEndpoint()">加载中...</span>
+                    </a>
+                    <span class="api-endpoint-badge" onclick="copyApiEndpoint()" title="点击复制API端点" style="cursor: pointer;">
+                        API端点: <span id="api-endpoint" style="color: #4CAF50; font-weight: bold;">加载中...</span>
                     </span>
                 </div>
             </div>
@@ -134,11 +142,11 @@ export const HTML_TEMPLATE = /* html */ `
             <div class="section" id="api-section">
                 <h2>接口调试</h2>
                 <div class="api-top-tabs">
-                    <button class="api-top-tab active" onclick="switchApiTopTab('debug', event)">接口调试</button>
-                    <button class="api-top-tab" onclick="switchApiTopTab('danmu-test', event)">弹幕测试</button>
+                    <button class="api-top-tab active" onclick="switchApiTopTab('danmu-test', event)">弹幕测试</button>
+                    <button class="api-top-tab" onclick="switchApiTopTab('debug', event)">接口调试</button>
                 </div>
 
-                <div class="api-tab-content active" id="api-debug-content">
+                <div class="api-tab-content" id="api-debug-content">
                     <div class="api-selector">
                         <div class="form-group">
                             <label>选择接口</label>
@@ -164,17 +172,18 @@ export const HTML_TEMPLATE = /* html */ `
                     </div>
                 </div>
 
-                <div class="api-tab-content" id="danmu-test-content">
+                <div class="api-tab-content active" id="danmu-test-content">
                     <div class="danmu-test-tabs">
                         <button class="danmu-test-tab active" onclick="switchDanmuTestTab('auto', event)">自动匹配测试</button>
                         <button class="danmu-test-tab" onclick="switchDanmuTestTab('manual', event)">手动匹配测试</button>
+                        <button class="danmu-test-tab" onclick="switchDanmuTestTab('favorite', event)">收藏</button>
                     </div>
 
                     <div class="danmu-test-panel active" id="auto-match-panel">
                         <p style="color: #666; margin-bottom: 15px;">模拟播放器自动匹配流程：输入文件名 → 匹配剧集 → 获取弹幕</p>
                         <div class="form-group" style="margin-bottom: 15px;">
                             <label>文件名</label>
-                            <div style="display:flex;gap:10px;margin-top:5px;">
+                            <div style="display:flex;gap:10px;margin-top:5px;flex-wrap:wrap;">
                                 <input type="text" id="auto-match-filename" placeholder="示例: 生万物 S02E08, 无忧渡.S02E08.2160p.WEB-DL" style="flex:1;">
                                 <button class="btn btn-success" id="auto-match-btn" onclick="autoMatchTest()">开始匹配</button>
                             </div>
@@ -188,10 +197,60 @@ export const HTML_TEMPLATE = /* html */ `
                             <div style="display:flex;gap:10px;margin-top:5px;">
                                 <input type="text" id="manual-search-keyword" placeholder="请输入动漫名称" style="flex:1;">
                                 <button class="btn btn-primary" id="manual-search-btn" onclick="manualSearchAnime()">搜索</button>
+                                <button class="btn btn-success favorite-action-btn" id="manual-favorite-btn" onclick="favoriteManualSearch()" disabled>收藏</button>
                             </div>
                         </div>
                         <div id="manual-anime-list" style="display:none;"></div>
                         <div id="manual-episode-list" style="display:none;"></div>
+                    </div>
+
+                    <div class="danmu-test-panel" id="favorite-panel">
+                        <p style="color: #666; margin-bottom: 15px;">收藏后的剧集会永久缓存，后续匹配可秒级返回缓存结果；对于《火影忍者》《名侦探柯南》等集数较多的剧集尤其有用，无需每次重新搜索。可在“手动匹配测试”界面搜索剧集后，点击“收藏”按钮添加搜索结果收藏。只缓存剧集搜索结果，不缓存弹幕。</p>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label>搜索收藏</label>
+                            <div style="display:flex;gap:10px;margin-top:5px;">
+                                <input type="text" id="favorite-search-input" placeholder="搜索收藏剧名或来源" oninput="handleFavoriteSearch(event)" style="flex:1;">
+                                <button class="btn btn-primary" onclick="loadFavoriteList()">刷新列表</button>
+                            </div>
+                        </div>
+                        <div class="preview-status" id="favorite-list-status" aria-live="polite"></div>
+                        <div class="favorite-list" id="favorite-list"></div>
+                    </div>
+
+                    <div class="modal" id="favorite-schedule-modal">
+                        <div class="modal-content favorite-schedule-modal-content">
+                            <div class="modal-header">
+                                <h3>设置定时刷新</h3>
+                                <button class="close-btn" onclick="closeFavoriteScheduleModal()">&times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="favorite-schedule-hint">按北京时间执行，仅 Node/Docker 部署支持定时刷新。</p>
+                                <input type="hidden" id="favorite-schedule-keyword">
+                                <div class="form-group">
+                                    <label for="favorite-schedule-frequency">刷新频率</label>
+                                    <select id="favorite-schedule-frequency" onchange="toggleFavoriteScheduleWeekday()">
+                                        <option value="daily">每天</option>
+                                        <option value="weekly">每周</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" id="favorite-schedule-weekday-group" style="display:none;">
+                                    <label for="favorite-schedule-weekday">星期</label>
+                                    <select id="favorite-schedule-weekday">
+                                        <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option>
+                                        <option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="favorite-schedule-time">时间</label>
+                                    <input type="time" id="favorite-schedule-time" value="03:00">
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button class="btn btn-danger" id="favorite-schedule-disable-btn" onclick="disableFavoriteSchedule()">关闭定时刷新</button>
+                                <button class="btn btn-primary" onclick="closeFavoriteScheduleModal()">取消</button>
+                                <button class="btn btn-success" onclick="saveFavoriteSchedule()">保存</button>
+                            </div>
+                        </div>
                     </div>
 
                     <div id="danmu-result-area" style="display:none;"></div>
@@ -337,38 +396,32 @@ export const HTML_TEMPLATE = /* html */ `
                 <div class="theme-settings" id="theme-settings" hidden>
                     <div class="theme-settings-copy">
                         <h3>界面主题</h3>
-                        <span class="theme-current-label" id="theme-current-label">UI_THEME · 海湾蓝</span>
+                        <span class="theme-current-label" id="theme-current-label">UI_THEME · 经典默认</span>
                     </div>
                     <div class="theme-options" role="radiogroup" aria-label="界面主题选择">
-                        <button type="button" role="radio" class="theme-option" data-theme-option="ocean" aria-checked="false" onclick="selectTheme('ocean')" title="海湾蓝">
-                            <span class="theme-swatches" aria-hidden="true"><i style="background: #145b6f"></i><i style="background: #159b8f"></i><i style="background: #dfe9f1"></i></span><span class="theme-option-label">海湾蓝</span>
-                        </button>
-                        <button type="button" role="radio" class="theme-option" data-theme-option="forest" aria-checked="false" onclick="selectTheme('forest')" title="森林绿">
-                            <span class="theme-swatches" aria-hidden="true"><i style="background: #245c45"></i><i style="background: #b36a3c"></i><i style="background: #e5eee8"></i></span><span class="theme-option-label">森林绿</span>
-                        </button>
-                        <button type="button" role="radio" class="theme-option" data-theme-option="graphite" aria-checked="false" onclick="selectTheme('graphite')" title="石墨夜">
-                            <span class="theme-swatches" aria-hidden="true"><i style="background: #0e1115"></i><i style="background: #55b8c9"></i><i style="background: #20242a"></i></span><span class="theme-option-label">石墨夜</span>
-                        </button>
-                        <button type="button" role="radio" class="theme-option" data-theme-option="berry" aria-checked="false" onclick="selectTheme('berry')" title="莓果红">
-                            <span class="theme-swatches" aria-hidden="true"><i style="background: #702846"></i><i style="background: #315b8a"></i><i style="background: #f1e5eb"></i></span><span class="theme-option-label">莓果红</span>
-                        </button>
-                        <button type="button" role="radio" class="theme-option" data-theme-option="monochrome" aria-checked="false" onclick="selectTheme('monochrome')" title="黑白简约">
-                            <span class="theme-swatches" aria-hidden="true"><i style="background: #111111"></i><i style="background: #767676"></i><i style="background: #f2f2f2"></i></span><span class="theme-option-label">黑白简约</span>
-                        </button>
-                        <button type="button" role="radio" class="theme-option" data-theme-option="sunset" aria-checked="false" onclick="selectTheme('sunset')" title="暖霞橙">
-                            <span class="theme-swatches" aria-hidden="true"><i style="background: #4d344b"></i><i style="background: #b54132"></i><i style="background: #ebeef2"></i></span><span class="theme-option-label">暖霞橙</span>
-                        </button>
-                        <button type="button" role="radio" class="theme-option" data-theme-option="aurora" aria-checked="false" onclick="selectTheme('aurora')" title="极光青">
-                            <span class="theme-swatches" aria-hidden="true"><i style="background: #164a4a"></i><i style="background: #d49a3a"></i><i style="background: #dfe8e6"></i></span><span class="theme-option-label">极光青</span>
-                        </button>
-                        <button type="button" role="radio" class="theme-option" data-theme-option="mist" aria-checked="false" onclick="selectTheme('mist')" title="晨雾灰">
-                            <span class="theme-swatches" aria-hidden="true"><i style="background: #40566b"></i><i style="background: #a94f42"></i><i style="background: #e7ebef"></i></span><span class="theme-option-label">晨雾灰</span>
-                        </button>
-                        <button type="button" role="radio" class="theme-option" data-theme-option="terminal" aria-checked="false" onclick="selectTheme('terminal')" title="终端绿">
-                            <span class="theme-swatches" aria-hidden="true"><i style="background: #050706"></i><i style="background: #4faf75"></i><i style="background: #1d231f"></i></span><span class="theme-option-label">终端绿</span>
-                        </button>
                         <button type="button" role="radio" class="theme-option" data-theme-option="lavender" aria-checked="false" onclick="selectTheme('lavender')" title="经典默认">
-                            <span class="theme-swatches" aria-hidden="true"><i style="background: #1a2980"></i><i style="background: #26d0ce"></i><i style="background: #a0b9e8"></i></span><span class="theme-option-label">经典默认</span>
+                            <span class="theme-swatches" aria-hidden="true"><i style="background:#667eea"></i><i style="background:#5a6fd6"></i><i style="background:#eef0f8"></i></span><span class="theme-option-label">经典默认</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="shinyo" aria-checked="false" onclick="selectTheme('shinyo')" title="新叶绿">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background:#8cb48c"></i><i style="background:#7aa37a"></i><i style="background:#e8efe8"></i></span><span class="theme-option-label">新叶绿</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="sakura" aria-checked="false" onclick="selectTheme('sakura')" title="哔哩粉">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background:#f09199"></i><i style="background:#e08189"></i><i style="background:#ece6ef"></i></span><span class="theme-option-label">哔哩粉</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="tianyi" aria-checked="false" onclick="selectTheme('tianyi')" title="天依蓝">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background:#00a2ff"></i><i style="background:#0090e8"></i><i style="background:#e7edf5"></i></span><span class="theme-option-label">天依蓝</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="hatsune" aria-checked="false" onclick="selectTheme('hatsune')" title="初音青">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background:#39c5bb"></i><i style="background:#2eb3a9"></i><i style="background:#e6f2f0"></i></span><span class="theme-option-label">初音青</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="sakuragi" aria-checked="false" onclick="selectTheme('sakuragi')" title="樱木红">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background:#e9485e"></i><i style="background:#d63d52"></i><i style="background:#f0e7e9"></i></span><span class="theme-option-label">樱木红</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="violet" aria-checked="false" onclick="selectTheme('violet')" title="罗兰紫">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background:#a682e6"></i><i style="background:#9570d8"></i><i style="background:#ede8f5"></i></span><span class="theme-option-label">罗兰紫</span>
+                        </button>
+                        <button type="button" role="radio" class="theme-option" data-theme-option="amber" aria-checked="false" onclick="selectTheme('amber')" title="LCL橘">
+                            <span class="theme-swatches" aria-hidden="true"><i style="background:#f78c50"></i><i style="background:#e67a40"></i><i style="background:#f0ebe6"></i></span><span class="theme-option-label">LCL橘</span>
                         </button>
                     </div>
                 </div>
@@ -397,36 +450,22 @@ export const HTML_TEMPLATE = /* html */ `
             <form id="env-form">
                 <div class="form-group">
                     <label>变量类别</label>
-                    <select id="env-category" disabled>
-                        <option value="api">🔗 API配置</option>
-                        <option value="source">📜 源配置</option>
-                        <option value="match">🔍 匹配配置</option>
-                        <option value="danmu">🔣 弹幕配置</option>
-                        <option value="cache">💾 缓存配置</option>
-                        <option value="system">⚙️ 系统配置</option>
-                    </select>
+                    <div class="readonly-field" id="env-category-display"></div>
                 </div>
                 <div class="form-group">
                     <label>变量名</label>
-                    <input type="text" id="env-key" placeholder="例如: DB_HOST" required readonly>
+                    <div class="readonly-field" id="env-key-display"></div>
                 </div>
                 <div class="form-group">
                     <label>值类型</label>
-                    <select id="value-type" onchange="renderValueInput()" disabled>
-                        <option value="text">文本</option>
-                        <option value="boolean">布尔值</option>
-                        <option value="number">数字 (1-100)</option>
-                        <option value="select">单选</option>
-                        <option value="multi-select">多选 (可排序)</option>
-                        <option value="map">映射</option>
-                    </select>
+                    <div class="readonly-field" id="value-type-display"></div>
                 </div>
                 <div class="form-group" id="value-input-container">
                     <!-- 动态渲染的值输入控件 -->
-                    </div>
+                </div>
                 <div class="form-group">
                     <label>描述</label>
-                    <textarea id="env-description" placeholder="配置项说明" readonly></textarea>
+                    <div class="readonly-field" id="env-description-display"></div>
                 </div>
                 <div style="display: flex; gap: 10px;">
                     <button type="submit" class="btn btn-success" style="flex: 1;">保存</button>
@@ -443,17 +482,19 @@ export const HTML_TEMPLATE = /* html */ `
         </p>
         <p class="footer-text">本项目仅为个人学习爱好开发，代码开源。如有任何侵权行为，请联系本人删除。</p>
         <p class="footer-text">本项目完全免费，不收取任何费用，请勿上当受骗。</p>
-        <p class="footer-links">
-            <a href="https://t.me/ddjdd_bot" target="_blank" class="footer-link">💬 TG MSG ROBOT</a>
-            <a href="https://t.me/logvar_danmu_group" target="_blank" class="footer-link">👥 TG GROUP</a>
-            <a href="https://t.me/logvar_danmu_channel" target="_blank" class="footer-link">📢 TG CHANNEL</a>
-            <a href="https://github.com/huangxd-/danmu_api" target="_blank" class="footer-link github-link">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg" alt="GitHub" class="github-icon">
-                GitHub Repo
-            </a>
-        </p>
         <p>有问题提issue或私信机器人都ok</p>
     </footer>
+
+    <!-- 底部链接栏 -->
+    <nav class="footer-bar">
+        <a href="https://t.me/ddjdd_bot" target="_blank" class="footer-bar-link">💬 TG MSG ROBOT</a>
+        <a href="https://t.me/logvar_danmu_group" target="_blank" class="footer-bar-link">👥 TG GROUP</a>
+        <a href="https://t.me/logvar_danmu_channel" target="_blank" class="footer-bar-link">📢 TG CHANNEL</a>
+        <a href="https://github.com/huangxd-/danmu_api" target="_blank" class="footer-bar-link github-link">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg" alt="GitHub" class="github-icon">
+            GitHub Repo
+        </a>
+    </nav>
 
     <script>
         ${mainJsContent}
