@@ -296,6 +296,17 @@ body[data-theme] .favorite-schedule-btn:disabled:hover {
     font-size: 12px;
 }
 
+.btn-secondary {
+    background: var(--theme-panel-strong);
+    color: var(--theme-text);
+    border: 1px solid var(--theme-border);
+}
+
+.btn-secondary:hover {
+    border-color: var(--theme-accent);
+    color: var(--theme-accent);
+}
+
 /* ============ 配置预览 ============ */
 .preview-description {
     color: var(--theme-muted);
@@ -959,6 +970,115 @@ body.modal-open {
     font-size: 13px;
 }
 
+/* 通用复选框：appearance 自绘控制勾选色；body[data-theme] 前缀将特异性提至 3002，压过 .form-group input 的背景/边框(2002)与尺寸/内边距(1001) */
+body[data-theme] input[type="checkbox"].app-checkbox {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    padding: 0;
+    flex-shrink: 0;
+    vertical-align: middle;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    background: var(--theme-panel-bg);
+    border: 1px solid var(--theme-muted);
+    border-radius: 3px;
+}
+
+body[data-theme] input[type="checkbox"].app-checkbox:checked {
+    background: var(--theme-accent);
+    border-color: var(--theme-accent);
+}
+
+body[data-theme] input[type="checkbox"].app-checkbox:checked::after {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 4px;
+    height: 9px;
+    border: solid var(--theme-check-color);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+body[data-theme] input[type="checkbox"].app-checkbox:focus-visible {
+    outline: 2px solid var(--theme-accent-soft);
+    outline-offset: 1px;
+}
+
+.cache-clear-hint {
+    margin: 0 0 12px;
+    font-size: 16px;
+    color: var(--theme-text);
+}
+
+.cache-clear-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.cache-clear-count {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--theme-muted);
+    background: color-mix(in srgb, var(--theme-muted) 10%, transparent); /* 状态标签底色，非按钮 */
+    padding: 5px 10px;
+    border-radius: 999px;
+}
+
+.cache-clear-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.cache-clear-actions .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+    min-width: 64px;
+}
+
+.cache-clear-options {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    border: 1px solid var(--theme-border);
+    border-radius: var(--app-radius-card-sm);
+    overflow: hidden;
+    background: var(--theme-panel-bg);
+}
+
+.cache-clear-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--theme-border);
+}
+
+.cache-clear-item:last-child {
+    border-bottom: none;
+}
+
+.cache-clear-item:hover {
+    background: var(--theme-panel-strong);
+}
+
+.cache-clear-note {
+    margin: 12px 0 0;
+    font-size: 12px;
+    color: var(--theme-muted);
+}
+
 .warning-box {
     background: rgba(240, 160, 96, 0.10);
     border-left: 3px solid #f0a060;
@@ -967,6 +1087,44 @@ body.modal-open {
     margin-top: 12px;
     margin-bottom: 18px;
     font-size: 13px;
+}
+
+.error-config-banner {
+    background: var(--theme-panel-strong);
+    border: 1px solid var(--theme-border);
+    padding: 15px;
+    border-radius: var(--app-radius-card-sm);
+    margin-bottom: 20px;
+}
+
+.error-config-title {
+    color: var(--theme-accent);
+    margin-top: 0;
+    font-size: 16px;
+}
+
+.error-config-text {
+    color: var(--theme-muted);
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+.error-config-banner input {
+    padding: 8px 10px;
+    border: 1px solid var(--theme-border);
+    border-radius: 8px;
+    background: var(--theme-input-bg);
+    color: var(--theme-text);
+}
+
+.error-config-banner code {
+    background: var(--theme-panel-bg);
+    border: 1px solid var(--theme-border);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+    font-size: 0.85em;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    word-break: break-all;
 }
 
 .close-btn {
@@ -1832,6 +1990,25 @@ body.modal-open {
 
 .danmu-filter-tabs::-webkit-scrollbar { display: none; }
 
+.danmu-list-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.danmu-search {
+    flex: 1 1 260px;
+    min-width: 0;
+    max-width: 420px;
+}
+
+.danmu-search-status {
+    color: var(--theme-muted);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
 .danmu-filter-tab {
     flex: 0 0 auto;
     display: inline-flex;
@@ -1936,6 +2113,32 @@ body.modal-open {
     font-weight: 600;
 }
 
+.episode-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 8px;
+    gap: 16px;
+    transition: background 0.15s;
+}
+
+.episode-item:hover {
+    background: var(--theme-panel-bg);
+    box-shadow: inset 3px 0 0 var(--theme-accent);
+}
+
+.episode-item-content {
+    min-width: 0;
+    font-size: 14px;
+    color: var(--theme-text);
+}
+
+.episode-item .btn {
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
 .danmu-mode-scroll { background: rgba(94, 196, 219, 0.15); color: #3aafc8; }
 .danmu-mode-top { background: rgba(224, 112, 122, 0.15); color: #d4626c; }
 .danmu-mode-bottom { background: rgba(82, 166, 125, 0.15); color: #459670; }
@@ -1968,12 +2171,19 @@ body.modal-open {
     border: 1px solid var(--theme-border);
 }
 
+.jump-to-episode > span {
+    font-size: 13px;
+}
+
 .jump-episode-input {
     padding: 7px 12px;
     width: 110px;
+    max-width: 100%;
+    min-width: 0;
     border: 1px solid var(--theme-border);
     border-radius: var(--app-radius-input);
     font-size: 13px;
+    text-align: center;
     background: var(--theme-input-bg);
     color: var(--theme-text);
 }
@@ -2034,6 +2244,109 @@ body.modal-open {
     display: flex;
     gap: 6px;
     margin-left: auto;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.danmu-export-select {
+    background-color: var(--theme-panel-strong);
+    color: var(--theme-text);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--app-radius-btn);
+    padding: 5px 12px;
+    font-size: 12px;
+    line-height: 1.4;
+    max-width: 220px;
+    cursor: pointer;
+}
+
+.danmu-export-select:hover {
+    border-color: var(--theme-accent);
+}
+
+.danmu-export-select:focus-visible {
+    outline: 2px solid var(--theme-accent);
+    outline-offset: 2px;
+}
+
+.danmu-source-url {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    padding: 9px 10px;
+    border: 1px solid var(--theme-border);
+    border-radius: var(--app-radius-card-sm);
+    background: var(--theme-panel-bg);
+}
+
+.danmu-source-url-label {
+    color: var(--theme-muted);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.danmu-source-url-value {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--theme-text);
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: text;
+}
+
+.danmu-source-url-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.danmu-source-url-actions .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .danmu-list-tools {
+        flex-wrap: wrap;
+    }
+
+    .preview-search.danmu-search {
+        order: 0;
+        flex: 1 1 100%;
+        width: 100%;
+        max-width: none;
+    }
+
+    .danmu-search-status {
+        order: 1;
+        margin-left: auto;
+    }
+
+    .danmu-export-btns {
+        flex: 1 1 0;
+        min-width: 0;
+        flex-wrap: nowrap;
+    }
+
+    .danmu-export-select {
+        flex: 1 1 160px;
+        max-width: none;
+        min-width: 0;
+    }
+
+    .danmu-export-btns .btn {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+
+    .danmu-result-toolbar .btn-back {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
 }
 
 /* ============ 颜色池配置 ============ */
@@ -2400,6 +2713,11 @@ body[data-theme$="-dark"] .heatmap-bar {
     gap: 10px;
 }
 
+.recent-data-load-more {
+    width: 100%;
+    margin-top: 10px;
+}
+
 .anime-cache-card {
     background: var(--theme-container-bg);
     border: 1px solid var(--theme-border);
@@ -2423,8 +2741,7 @@ body[data-theme$="-dark"] .heatmap-bar {
     width: 56px;
     height: 76px;
     border-radius: 8px;
-    background-size: cover;
-    background-position: center;
+    object-fit: cover;
     background-color: var(--theme-panel-strong);
     flex-shrink: 0;
 }
@@ -2439,9 +2756,7 @@ body[data-theme$="-dark"] .heatmap-bar {
     font-weight: 700;
     color: var(--theme-text);
     margin-bottom: 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
 }
 
 .anime-cache-meta {
@@ -2471,8 +2786,7 @@ body[data-theme$="-dark"] .heatmap-bar {
     width: 36px;
     height: 48px;
     border-radius: 6px;
-    background-size: cover;
-    background-position: center;
+    object-fit: cover;
     background-color: var(--theme-panel-strong);
     flex-shrink: 0;
 }
@@ -2486,9 +2800,7 @@ body[data-theme$="-dark"] .heatmap-bar {
     font-size: 12px;
     font-weight: 600;
     color: var(--theme-text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
 }
 
 .anime-cache-child-actions {

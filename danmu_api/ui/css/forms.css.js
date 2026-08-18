@@ -540,7 +540,7 @@ input:checked + .slider:before {
     transition: transform 0.22s var(--app-ease-smooth);
 }
 .map-remove-btn:hover {
-    transform: rotate(90deg);
+    transform: translateY(-1px);
 }
 
 .map-item-template {

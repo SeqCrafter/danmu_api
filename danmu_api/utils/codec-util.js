@@ -802,7 +802,7 @@ export function stringToUtf8Bytes(str) {
 }
 
 // 修改后的 aesDecryptBase64
-function aesDecryptBase64(cipherB64, keyStr) {
+export function aesDecryptBase64(cipherB64, keyStr) {
   try {
     const cipherBytes = base64ToBytes(cipherB64);
     const keyBytes = stringToUtf8Bytes(keyStr);
@@ -878,7 +878,7 @@ export function bytesToBase64(bytes) {
 
 // ===================== SHA256 算法 =====================
 // 纯 JS SHA256，返回字节数组
-function sha256(ascii) {
+export function sha256(ascii) {
     function rightRotate(n, x) { return (x >>> n) | (x << (32 - n)); }
 
     let maxWord = Math.pow(2, 32);

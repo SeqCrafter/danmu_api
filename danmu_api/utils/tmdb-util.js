@@ -593,7 +593,7 @@ export async function getTMDBChineseTitle(title, season = null, episode = null) 
 // 优先尝试本地 Bangumi Data 转换
   if (globals.useBangumiData) {
     const cleanTitle = cleanSearchQuery(title);
-    const localMatches = searchBangumiData(cleanTitle, ['tmdb', 'bangumi', 'anidb']);
+    const localMatches = await searchBangumiData(cleanTitle, ['tmdb', 'bangumi', 'anidb']);
     if (localMatches && localMatches.length > 0) {
       const m = localMatches[0];
       // 找一个不全是外文的翻译作为中文名

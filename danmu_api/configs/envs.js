@@ -13,6 +13,13 @@ export class Envs {
   static originalEnvVars = new Map();
   static accessedEnvVars = new Map();
 
+  // Node 本地部署时由 server.js 注入：启动前的真实系统环境变量快照（最高优先级判定依据）与 .env 原始解析结果
+  static systemEnvBackup = null;
+  static rawEnvValues = null;
+
+  // 允许在值中写入 # 等 dotenv 视为注释字符的文本类变量；读取时绕过 dotenv 截断以保留完整内容。仅纳入 encrypt=false 变量（带令牌/密码 URL 若入此集合会绕过加密返回明文，故禁止纳入）。
+  static RAW_ENV_KEYS = new Set(['AI_MATCH_PROMPT', 'ANIME_TITLE_FILTER', 'AUTO_MATCH_MAPPING_TABLE', 'BLOCKED_WORDS', 'COLOR_POOL', 'CUSTOM_MERGE_RULES', 'DANMU_OFFSET', 'DANMU_PUSH_URL', 'EPISODE_TITLE_FILTER', 'IP_BLACKLIST', 'OTHER_SERVER', 'TITLE_MAPPING_TABLE', 'TITLE_NOISE_FILTER', 'VOD_SERVERS']);
+
   static VOD_ALLOWED_PLATFORMS = ['qiyi', 'bilibili1', 'imgo', 'youku', 'qq', 'migu', 'sohu', 'leshi', 'xigua', 'maiduidui', 'aiyifan']; // vod允许的播放平台
   static ALLOWED_PLATFORMS = ['qiyi', 'bilibili1', 'imgo', 'youku', 'qq', 'migu', 'renren', 'hanjutv', 'sohu', 'leshi', 'xigua', 'maiduidui', 'aiyifan', 'hongguo', 'dandan', 'bahamut', 'animeko', 'custom']; // 全部源允许的播放平台
   static ALLOWED_SOURCES = ['360', 'vod', 'tmdb', 'douban', 'tencent', 'youku', 'iqiyi', 'imgo', 'bilibili', 'migu', 'renren', 'hanjutv', 'sohu', 'leshi', 'xigua', 'maiduidui', 'aiyifan', 'hongguo', 'dandan', 'bahamut', 'animeko', 'custom']; // 允许的源
@@ -63,6 +70,10 @@ export class Envs {
    * @returns {any} 转换后的值
    */
   static get(key, defaultValue, type = 'string', encrypt = false) {
+    // 文本类且未加密的自定义变量绕过 dotenv 注释截断，保留 # 等字符；加密变量不在此路径，避免绕过加密返回明文
+    if (type === 'string' && !encrypt && Envs.RAW_ENV_KEYS.has(key)) {
+      return this.getRawEnv(key, defaultValue);
+    }
     let value;
     if (typeof this.env !== 'undefined' && this.env[key]) {
       value = this.env[key];
@@ -117,6 +128,64 @@ export class Envs {
    */
   static encryptStr(str) {
     return '*'.repeat(str.length);
+  }
+
+  /**
+   * 解析 .env 原始内容：跳过整行 # 注释、保留行内 #，并剥除整体双引号包裹（与 node-handler 引号写入一致）。
+   * @param {string} text .env 文件原始内容
+   * @returns {Object} 键值映射
+   */
+  static parseRawEnvText(text) {
+    const result = {};
+    if (typeof text !== 'string') return result;
+    const lines = text.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      if (!key) continue;
+      let value = trimmed.slice(eq + 1).trim();
+      if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+        value = value.slice(1, -1);
+      }
+      result[key] = value;
+    }
+    return result;
+  }
+
+  /**
+   * 读取自定义文本类变量，绕过 dotenv 截断保留 #：系统环境变量 > .env 原始值 > 默认值；非 Node 部署退化为普通取值。
+   * @param {string} key 环境变量键
+   * @param {string} defaultValue 默认值
+   * @returns {string} 原始值（含 #）
+   */
+  static getRawEnv(key, defaultValue = '') {
+    const finalize = (v) => {
+      this.originalEnvVars.set(key, v);
+      this.accessedEnvVars.set(key, v);
+      return v;
+    };
+
+    // 非 Node 运行时（测试 / Workers）：不做文件读取，等价于普通取值，保证测试隔离与平台兼容
+    if (!Envs.systemEnvBackup) {
+      if (this.env && this.env[key]) return finalize(this.env[key]);
+      if (typeof process !== 'undefined' && process.env?.[key]) return finalize(process.env[key]);
+      return finalize(defaultValue);
+    }
+
+    // Node 运行时：系统环境变量始终最高优先级
+    if (Object.prototype.hasOwnProperty.call(Envs.systemEnvBackup, key)) {
+      return finalize(Envs.systemEnvBackup[key]);
+    }
+
+    // 否则读取 .env 原始行（保留 #），未配置该键时回退 process.env 或默认值
+    if (Envs.rawEnvValues && Object.prototype.hasOwnProperty.call(Envs.rawEnvValues, key)) {
+      return finalize(Envs.rawEnvValues[key]);
+    }
+    if (typeof process !== 'undefined' && process.env?.[key]) return finalize(process.env[key]);
+    return finalize(defaultValue);
   }
 
   /**
@@ -321,8 +390,7 @@ export class Envs {
         console.warn(`[Envs] 解析合并映射表规则失败: ${rStr}`, e);
       }
     }
-    
-    this.accessedEnvVars.set('CUSTOM_MERGE_RULES', raw);
+
     return rules;
   }
 
@@ -622,6 +690,7 @@ export class Envs {
       // API配置
       'TOKEN': { category: 'api', type: 'text', description: 'API访问令牌' },
       'ADMIN_TOKEN': { category: 'api', type: 'text', description: '系统管理访问令牌' },
+      'FAVORITE_REQUIRE_ADMIN': { category: 'api', type: 'boolean', description: '收藏写入和管理接口是否必须使用 ADMIN_TOKEN，默认关闭；收藏列表始终可公开读取' },
       'RATE_LIMIT_MAX_REQUESTS': { category: 'api', type: 'number', description: '限流配置：1分钟内最大请求次数，0表示不限流，默认3', min: 0, max: 50 },
 
       // 源配置
@@ -636,6 +705,7 @@ export class Envs {
       'BILIBILI_COOKIE': { category: 'source', type: 'text', description: 'B站Cookie' },
       'DOUBAN_COOKIE': { category: 'source', type: 'text', description: '豆瓣Cookie' },
       'YOUKU_CONCURRENCY': { category: 'source', type: 'number', description: '优酷并发配置，默认8', min: 1, max: 16 },
+      'NIPAPLAY_REPLACE_DANDAN': { category: 'source', type: 'boolean', description: 'NipaPlay 弹弹302关联弹幕替代开关（用于 dandan 源）。\n默认为 false（关闭，使用弹弹原生弹幕），可选值：true、false。\n开启后 dandan 源以 nipaplay 弹弹302关联弹幕替代弹弹原生弹幕，因使用的是项目链路获取弹幕所以：\n1.会丢失弹弹平台弹幕\n2.无法获取下架视频\n3.如果关联中有巴哈姆特平台需要确保能够连通巴哈' },
       
       // 匹配配置
       'PLATFORM_ORDER': { category: 'match', type: 'multi-select', options: this.ALLOWED_PLATFORMS, description: '平台排序配置，可以配置自动匹配时的优选平台。\n当配置合并平台的时候，可以指定期望的合并源，\n示例：一个结果返回了"dandan&bilibili1&animeko"和"youku"时，\n当配置"youku"时返回"youku" \n当配置"dandan&animeko"时返回"dandan&bilibili1&animeko"' },
@@ -697,6 +767,7 @@ export class Envs {
       allowedPlatforms: this.ALLOWED_PLATFORMS,
       token: this.get('TOKEN', '87654321', 'string', true), // token，默认为87654321
       adminToken: this.get('ADMIN_TOKEN', '', 'string', true), // admin token，用于系统管理访问控制
+      favoriteRequireAdmin: this.get('FAVORITE_REQUIRE_ADMIN', false, 'boolean'), // 收藏写入和管理接口是否必须使用 admin token；列表始终公开
       sourceOrderArr: this.resolveSourceOrder(), // 源排序
       mergeSourcePairs: this.resolveMergeSourcePairs(), // 源合并配置，用于将源合并获取
       customMergeRules: this.resolveCustomMergeRules(), // 合并映射表，用于自定义源合并行为。
@@ -733,6 +804,7 @@ export class Envs {
       commentCacheMinutes: this.get('COMMENT_CACHE_MINUTES', 3, 'number'), // 弹幕缓存时间配置（分钟，默认 3）
       commentCacheMinCount: this.get('COMMENT_CACHE_MIN_COUNT', 100, 'number'), // 弹幕缓存最少条数，低于该值时忽略缓存（默认 100，0 表示关闭）
       hongguoMergeAllEpisodes: this.get('HONGGUO_MERGE_ALL_EPISODES', false, 'boolean'), // 红果短剧是否合并全集弹幕（默认 false）
+      nipaplayReplaceDandan: this.get('NIPAPLAY_REPLACE_DANDAN', false, 'boolean'), // NipaPlay 弹弹302关联弹幕替代开关，开启后 dandan 源以 nipaplay 弹弹302关联弹幕替代弹弹原生弹幕
       convertTopBottomToScroll: this.get('CONVERT_TOP_BOTTOM_TO_SCROLL', false, 'boolean'), // 顶部/底部弹幕转换为浮动弹幕配置（默认 false，禁用转换）
       convertColor: this.get('CONVERT_COLOR', 'default', 'string'), // 弹幕转换颜色配置，支持 default、white、color（默认 default，禁用转换）
       colorPool: this.get('COLOR_POOL', '16777215,16777215,16777215,16777215,16777215,16777215,16777215,16777215,16744319,16752762,16774799,9498256,8388564,8900346,14204888,16758465', 'string'), // 自定义颜色池，CONVERT_COLOR为color时生效

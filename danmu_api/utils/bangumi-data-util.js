@@ -18,13 +18,11 @@ let downloadLockTime = 0;
 let memoryFootprintMB = '0.00';
 let hasLoggedCacheWarning = false;
 let charInvertedIndex = new Map();
+let currentBackgroundDownload = null; // 在途后台下载 Promise：由 initBangumiData 在发起非阻塞刷新时写入，供边缘层 ctx.waitUntil 延长 Serverless 生命周期
 
-// 当前生效的数据源标识 ('custom' | 'official')
-let activeDataSource = 'custom';
-// 缓存已解析的版本号（进程内有效）
-let cachedCustomVersion = null;
+let activeDataSource = 'custom'; // 当前生效的数据源标识 ('custom' | 'official')
+let cachedCustomVersion = null; // 缓存已解析的版本号（进程内有效）
 let cachedOfficialVersion = null;
-
 let versionQueryPromise = null; // 版本查询并发锁：serverless环境下冻结时异步信号可能不生效，共享同一Promise避免重复探测
 
 // 定义缓存目录/文件名
@@ -193,6 +191,46 @@ async function selectBestDataSource() {
     return versionQueryPromise;
 }
 
+// 数据下载触发时机：仅在 searchBangumiData 消费路径进入时触发下载；开关关闭或无所消费源时不下载
+// 开启时复用 initBangumiData 加载/下载，并发调用等待同一就绪缓存而不重复请求
+export async function ensureBangumiDataReady(deployPlatform = globals.deployPlatform) {
+    if (!globals.useBangumiData) return;
+    await initBangumiData(deployPlatform, true);
+}
+
+// 配置变更后同步 Bangumi Data 生命周期：开关开启立即下载（已缓存则幂等），关闭释放缓存
+// 调用前须保证 globals.useBangumiData 已反映最新配置（watcher 场景须先同步内存开关）
+export function syncBangumiDataLifecycleOnConfigChange(deployPlatform = globals.deployPlatform) {
+    if (globals.useBangumiData) {
+        initBangumiData(deployPlatform, true).catch(console.error);
+    } else {
+        clearBangumiDataCache(true);
+    }
+}
+
+// 读取在途后台下载 Promise，供边缘运行时在请求响应后延长生命周期（无在途时返回 null）
+export function getBackgroundDownload() {
+    return currentBackgroundDownload;
+}
+
+// 边缘运行时在响应返回后延长生命周期：仅在存在在途后台下载且运行时提供 waitUntil 时注册
+export function extendBangumiDownloadLifecycle(ctx) {
+    if (ctx && typeof ctx.waitUntil === 'function' && currentBackgroundDownload) {
+        ctx.waitUntil(currentBackgroundDownload);
+    }
+}
+
+// 发起后台静默下载并记录在途 Promise：下载完成时复位状态，供 getBackgroundDownload 暴露给边缘层
+function startDownload(cachePath) {
+    isDownloading = true;
+    downloadLockTime = Date.now();
+    currentBackgroundDownload = downloadAndCache(cachePath).finally(() => {
+        isDownloading = false;
+        currentBackgroundDownload = null;
+    });
+    return currentBackgroundDownload;
+}
+
 /**
  * 初始化 Bangumi Data 数据源
  * 包含内存与磁盘双端缓存的生命周期校验，并在环境允许时持久化缓存数据
@@ -201,7 +239,7 @@ async function selectBestDataSource() {
  * @param {boolean} isDataDependentRequest - 当前是否为强依赖数据的核心接口请求
  * @returns {Promise<void>}
  */
-export async function initBangumiData(deployPlatform, isDataDependentRequest = false, ctx = null) {
+export async function initBangumiData(deployPlatform, isDataDependentRequest = false) {
     if (!globals.useBangumiData) return;
 
     let cachePath = null;
@@ -237,9 +275,7 @@ export async function initBangumiData(deployPlatform, isDataDependentRequest = f
         // 当内存过期或配置强制更新时，仅在核心请求触发后台静默更新
         if (isDataDependentRequest && !isDownloading) {
             log("info", `[system] [Bangumi-Data] 内存数据${cacheDays === 0 ? '强制更新' : '已过期'}，保留老数据服务本次请求，启动后台静默更新...`);
-            isDownloading = true;
-            downloadLockTime = Date.now();
-            downloadAndCache(cachePath).finally(() => { isDownloading = false; });
+            startDownload(cachePath);
         }
         return;
     }
@@ -274,9 +310,7 @@ export async function initBangumiData(deployPlatform, isDataDependentRequest = f
             if (cacheDays === 0 || (Date.now() - stats.mtimeMs >= expireMs)) {
                 if (isDataDependentRequest && !isDownloading) {
                     log("info", `[system] [Bangumi-Data] 磁盘数据${cacheDays === 0 ? '强制更新' : '已过期'}，保留老数据服务本次请求，启动后台静默更新...`);
-                    isDownloading = true;
-                    downloadLockTime = Date.now();
-                    downloadAndCache(cachePath).finally(() => { isDownloading = false; });
+                    startDownload(cachePath);
                 }
             }
             return;
@@ -289,19 +323,13 @@ export async function initBangumiData(deployPlatform, isDataDependentRequest = f
     // 内存与磁盘均无有效数据时的获取逻辑
     if (!isDownloading) {
         log("info", `[system] [Bangumi-Data] 未命中任何有效缓存，正在获取基础数据...`);
-        isDownloading = true;
-        downloadLockTime = Date.now();
 
-        const downloadPromise = downloadAndCache(cachePath).finally(() => { isDownloading = false; });
+        const downloadPromise = startDownload(cachePath);
 
         if (isDataDependentRequest) {
             await downloadPromise; 
         } else {
             log("info", `[system] [Bangumi-Data] 当前非核心请求，数据获取转入后台异步执行`);
-            if (ctx && typeof ctx.waitUntil === 'function') {
-                log("info", `[system] [Bangumi-Data] 调用 ctx.waitUntil 延长 Serverless 生命周期`);
-                ctx.waitUntil(downloadPromise);
-            }
         }
     } else if (isDataDependentRequest) {
         log("info", `[system] [Bangumi-Data] 正在等待基础数据下载完成...`);
@@ -503,6 +531,7 @@ async function downloadAndCache(cachePath) {
  * @returns {Array<Object>} 匹配的动漫条目数组
  */
 export async function searchBangumiData(keyword, siteKeys) {
+    await ensureBangumiDataReady();
     if (!memoryCache || !memoryCache.items) return [];
 
     let searchPromise = queryCache.get(keyword);

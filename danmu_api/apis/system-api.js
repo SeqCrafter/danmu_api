@@ -169,39 +169,62 @@ export function handleClearLogs() {
 
 /**
  * 处理清理缓存的请求
- * @returns {Response} 表示操作成功的响应
+ * @param {Request} [req] 可选请求体 { items: string[] }，用于指定待清理项；未提供时清理全部已知项
+ * @returns {Response} 表示操作结果的响应
  */
-export async function handleClearCache() {
- try {
-    // 清理 globals 中的缓存数据
-    globals.animes = [];
-    globals.episodeIds = [];
-    globals.episodeNum = 10001; // 重置为初始值
-    globals.lastSelectMap = new Map(); // 重新创建 Map 对象
-    globals.reqRecords = []; // 清空请求记录
-    globals.todayReqNum = 0; // 重置今日请求次数
-    
+export async function handleClearCache(req) {
+  // 各清理项对应的重置逻辑；请求记录与今日计数归入「请求历史记录」项
+  const clearActions = {
+    animes: () => { globals.animes = []; },
+    episodeIds: () => { globals.episodeIds = []; },
+    episodeNum: () => { globals.episodeNum = 10001; }, // 重置为初始值
+    lastSelectMap: () => { globals.lastSelectMap = new Map(); }, // 重新创建 Map 对象
     // 清理搜索和弹幕缓存
-    globals.searchCache = new Map();
-    globals.commentCache = new Map();
-    globals.requestHistory = new Map();
-
-    try {
-      // 清理 Bangumi-Data 内存与磁盘缓存
-      clearBangumiDataCache(true);
-      
-      // 触发异步数据重载
-      if (globals.useBangumiData) {
-        initBangumiData(globals.deployPlatform, false).catch(e => {
-          log("warn", `[system] [server] Bangumi-Data background reload failed: ${e.message}`);
-        });
+    searchCache: () => { globals.searchCache = new Map(); },
+    commentCache: () => { globals.commentCache = new Map(); },
+    requestHistory: () => {
+      globals.requestHistory = new Map();
+      globals.reqRecords = []; // 清空请求记录
+      globals.todayReqNum = 0; // 重置今日请求次数
+    },
+    bangumiData: () => {
+      try {
+        clearBangumiDataCache(true); // 清理 Bangumi-Data 内存与磁盘缓存
+        if (globals.useBangumiData) {
+          // 触发异步数据重载
+          initBangumiData(globals.deployPlatform, false).catch(e => {
+            log("warn", `[system] [server] Bangumi-Data background reload failed: ${e.message}`);
+          });
+        }
+      } catch (e) {
+        log("error", `[system] [server] Failed to clear Bangumi-Data cache: ${e.message}`);
       }
-    } catch (e) {
-      log("error", `[system] [server] Failed to clear Bangumi-Data cache: ${e.message}`);
     }
-    
+  };
+  const allItems = Object.keys(clearActions);
+
+  let effectiveItems;
+  if (req) {
+    let parsed = null;
+    try {
+      parsed = await req.json();
+    } catch (e) {
+      parsed = null;
+    }
+    const items = parsed && Array.isArray(parsed.items) ? parsed.items : null;
+    // 仅保留自身属性键，排除 __proto__ 等原型链键，避免误放行导致整次清理失败
+    effectiveItems = items ? items.filter(key => Object.prototype.hasOwnProperty.call(clearActions, key)) : allItems;
+  } else {
+    effectiveItems = allItems;
+  }
+
+  try {
+    for (const key of effectiveItems) {
+      clearActions[key]();
+    }
+
     log("info", `[system] [server] Memory cache cleared successfully`);
-    
+
     // 同步清理本地缓存和Redis缓存
     try {
       // 如果本地缓存有效，更新本地缓存
@@ -213,7 +236,7 @@ export async function handleClearCache() {
     } catch (localError) {
       log("warn", `[system] [server] Local cache may not be available: ${localError.message}`);
     }
-    
+
     try {
       // 如果Redis有效，更新Redis缓存
       if (globals.redisValid) {
@@ -235,19 +258,22 @@ export async function handleClearCache() {
     } catch (redisError) {
       log("warn", `[system] [server] LocalRedis may not be available: ${redisError.message}`);
     }
-    
-    log("info", `[system] [server] All caches cleared successfully`);
-    return jsonResponse({ success: true, message: "Cache cleared successfully", clearedItems: {
-      animes: 0,
-      episodeIds: 0,
-      episodeNum: 10001,
-      lastSelectMap: 0,
-      searchCache: 0,
-      commentCache: 0,
-      requestHistory: 0,
-      reqRecords: 0,
-      todayReqNum: 0
-    }}, 200);
+
+    const clearedItems = {};
+    for (const key of effectiveItems) {
+      if (key === "requestHistory") {
+        clearedItems.requestHistory = 0;
+        clearedItems.reqRecords = 0;
+        clearedItems.todayReqNum = 0;
+      } else if (key === "episodeNum") {
+        clearedItems.episodeNum = 10001;
+      } else {
+        clearedItems[key] = 0;
+      }
+    }
+
+    log("info", `[system] [server] Selected caches cleared successfully`);
+    return jsonResponse({ success: true, message: "Cache cleared successfully", clearedItems }, 200);
   } catch (error) {
     log("error", `[system] [server] Cache clear failed: ${error.message}`);
     return jsonResponse({ success: false, message: `Cache clear failed: ${error.message}` }, 500);

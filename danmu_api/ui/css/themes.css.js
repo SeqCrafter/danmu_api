@@ -40,6 +40,7 @@ body {
     --theme-code-bg: #1a1b24;
     --theme-code-text: #e2e4ea;
     --theme-link: #8cb48c;
+    --theme-check-color: #ffffff;
     color-scheme: light;
     background: var(--theme-page-bg);
     color: var(--theme-text);
@@ -112,6 +113,7 @@ body[data-color-scheme="dark"] {
     --theme-input-bg: rgba(255, 255, 255, 0.07);
     --theme-code-bg: #111118;
     --theme-code-text: #e2e4ea;
+    --theme-check-color: #000000;
     color-scheme: dark;
 }
 

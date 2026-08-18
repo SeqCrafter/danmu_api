@@ -815,7 +815,7 @@ export default class BilibiliSource extends BaseSource {
           return null;
         }
 
-        duration = data.data.duration;
+        duration = data.data.pages[p - 1].duration;
         cid = data.data.pages[p - 1].cid;
       } catch (error) {
         log("error", "[bilibili] 请求普通投稿视频信息失败:", error);

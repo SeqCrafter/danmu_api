@@ -2,6 +2,7 @@ import { jsonResponse } from '../utils/http-util.js';
 import { log } from '../utils/log-util.js';
 import { HandlerFactory } from '../configs/handlers/handler-factory.js';
 import { globals } from '../configs/globals.js';
+import { syncBangumiDataLifecycleOnConfigChange } from '../utils/bangumi-data-util.js';
 import AIClient from '../utils/ai-util.js';
 
 /**
@@ -24,6 +25,10 @@ export async function handleSetEnv(request) {
     // 调用handler的setEnv方法
     const result = await handler.setEnv(key, value);
     
+    if (result && key === 'USE_BANGUMI_DATA') {
+      syncBangumiDataLifecycleOnConfigChange(deployPlatform);
+    }
+
     if (result) {
       return jsonResponse({ success: true, message: `环境变量 ${key} 设置成功` });
     } else {
@@ -55,6 +60,10 @@ export async function handleAddEnv(request) {
     // 调用handler的addEnv方法
     const result = await handler.addEnv(key, value);
     
+    if (result && key === 'USE_BANGUMI_DATA') {
+      syncBangumiDataLifecycleOnConfigChange(deployPlatform);
+    }
+
     if (result) {
       return jsonResponse({ success: true, message: `环境变量 ${key} 添加成功` });
     } else {
@@ -86,6 +95,10 @@ export async function handleDelEnv(request) {
     // 调用handler的delEnv方法
     const result = await handler.delEnv(key);
     
+    if (result && key === 'USE_BANGUMI_DATA') {
+      syncBangumiDataLifecycleOnConfigChange(deployPlatform);
+    }
+
     if (result) {
       return jsonResponse({ success: true, message: `环境变量 ${key} 删除成功` });
     } else {

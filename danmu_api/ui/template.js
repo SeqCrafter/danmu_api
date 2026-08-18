@@ -84,16 +84,16 @@ export const HTML_TEMPLATE = /* html */ `
             <div class="section active" id="preview-section">
                 <h2>配置预览</h2>
                 
-                <div id="proxy-config-container" style="display: none; background: #fff3cd; border: 1px solid #ffeeba; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-                    <h3 style="color: #856404; margin-top: 0; font-size: 16px;">⚠️ 获取配置失败</h3>
-                    <p style="color: #856404; margin-bottom: 10px; font-size: 14px;">
+                <div id="proxy-config-container" class="error-config-banner" style="display: none;">
+                    <h3 class="error-config-title">⚠️ 获取配置失败</h3>
+                    <p class="error-config-text">
                         检测到无法获取配置。如果您使用了复杂的反向代理：例如将 <code>http://{ip}:9321/</code> 代理到了 <code>http://{ip}:9321/danmu_api/</code>，请在此处手动输入完整的反代后链接（不包含TOKEN和ADMIN_TOKEN的）
                     </p>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <input type="text" id="custom-base-url" placeholder="例如: http://192.168.8.1:2333/danmu_api/ (留空保存即恢复默认)" style="flex: 1; min-width: 200px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                        <input type="text" id="custom-base-url" placeholder="例如: http://192.168.8.1:2333/danmu_api/ (留空保存即恢复默认)" style="flex: 1; min-width: 200px;">
                         <button class="btn btn-primary" onclick="saveBaseUrl()">保存并刷新</button>
                     </div>
-                    <p style="color: #666; font-size: 12px; margin-top: 5px;">* 设置将保存在浏览器本地存储中，清除网页的‘本地存储空间’或者输入框中留空并保存可恢复默认</p>
+                    <p style="color: var(--theme-muted); font-size: 12px; margin-top: 5px;">* 设置将保存在浏览器本地存储中，清除网页的"本地存储空间"或者输入框中留空并保存可恢复默认</p>
                 </div>
 
                 <p class="preview-description">当前生效的环境变量配置</p>
@@ -194,10 +194,10 @@ export const HTML_TEMPLATE = /* html */ `
                         <p style="color: #666; margin-bottom: 15px;">模拟播放器手动搜索流程：搜索动漫 → 选择番剧 → 选择剧集 → 获取弹幕</p>
                         <div class="form-group" style="margin-bottom: 15px;">
                             <label>搜索关键字</label>
-                            <div style="display:flex;gap:10px;margin-top:5px;">
+                            <div class="search-actions">
                                 <input type="text" id="manual-search-keyword" placeholder="请输入动漫名称" style="flex:1;">
-                                <button class="btn btn-primary" id="manual-search-btn" onclick="manualSearchAnime()">搜索</button>
                                 <button class="btn btn-success favorite-action-btn" id="manual-favorite-btn" onclick="favoriteManualSearch()" disabled>收藏</button>
+                                <button class="btn btn-primary" id="manual-search-btn" onclick="manualSearchAnime()">搜索</button>
                             </div>
                         </div>
                         <div id="manual-anime-list" style="display:none;"></div>
@@ -318,22 +318,29 @@ export const HTML_TEMPLATE = /* html */ `
                 <div class="modal" id="clear-cache-modal">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h3>确认清理缓存</h3>
+                            <h3>选择要清理的缓存</h3>
                             <button class="close-btn" onclick="hideClearCacheModal()">&times;</button>
                         </div>
                         <div class="modal-body">
-                            <p style="margin-bottom: 20px;">确定要清理所有缓存吗？这将清除：</p>
-                            <ul class="confirmation-list">
-                                <li>动漫搜索缓存 (animes)</li>
-                                <li>剧集ID缓存 (episodeIds)</li>
-                                <li>剧集编号缓存 (episodeNum)</li>
-                                <li>最后选择映射缓存 (lastSelectMap)</li>
-                                <li>动画元数据缓存 (Bangumi Data)</li>
-                                <li>搜索结果缓存</li>
-                                <li>弹幕内容缓存</li>
-                                <li>请求历史记录</li>
-                            </ul>
-                            <p style="color: #666; margin-top: 20px;">清理后可能需要重新登录</p>
+                            <p class="cache-clear-hint">请勾选需要清理的缓存项：</p>
+                            <div class="cache-clear-toolbar">
+                                <span class="cache-clear-count" id="cache-clear-count"></span>
+                                <div class="cache-clear-actions">
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllCacheItems(true)">全选</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllCacheItems(false)">全不选</button>
+                                </div>
+                            </div>
+                            <div class="cache-clear-options">
+                                <label class="cache-clear-item"><input type="checkbox" class="app-checkbox" name="cacheItem" value="searchCache" checked onchange="updateCacheClearCount()"> 搜索结果缓存</label>
+                                <label class="cache-clear-item"><input type="checkbox" class="app-checkbox" name="cacheItem" value="commentCache" checked onchange="updateCacheClearCount()"> 弹幕内容缓存</label>
+                                <label class="cache-clear-item"><input type="checkbox" class="app-checkbox" name="cacheItem" value="requestHistory" checked onchange="updateCacheClearCount()"> 请求历史记录</label>
+                                <label class="cache-clear-item"><input type="checkbox" class="app-checkbox" name="cacheItem" value="animes" checked onchange="updateCacheClearCount()"> 动漫搜索缓存 (animes)</label>
+                                <label class="cache-clear-item"><input type="checkbox" class="app-checkbox" name="cacheItem" value="bangumiData" checked onchange="updateCacheClearCount()"> 动画元数据缓存 (bangumiData)</label>
+                                <label class="cache-clear-item"><input type="checkbox" class="app-checkbox" name="cacheItem" value="episodeIds" checked onchange="updateCacheClearCount()"> 剧集ID缓存 (episodeIds)</label>
+                                <label class="cache-clear-item"><input type="checkbox" class="app-checkbox" name="cacheItem" value="episodeNum" checked onchange="updateCacheClearCount()"> 剧集编号缓存 (episodeNum)</label>
+                                <label class="cache-clear-item"><input type="checkbox" class="app-checkbox" name="cacheItem" value="lastSelectMap" checked onchange="updateCacheClearCount()"> 最后选择映射缓存 (lastSelectMap)</label>
+                            </div>
+                            <p class="cache-clear-note">清理后可能需要重新登录</p>
                         </div>
                         <div class="modal-footer">
                             <button class="btn btn-success" onclick="confirmClearCache()">确认清理</button>
