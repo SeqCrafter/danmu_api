@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { handleRequest } from './worker.js';
 import { extractTitleSeasonEpisode, getBangumi, getComment, getCommentByUrl, matchAnime, searchAnime, buildSearchAnimeUrl } from "./apis/dandan-api.js";
+import { stripLinkOffset, applyOffset } from "./utils/offset-util.js";
 import { handleFavoriteRefresh } from './apis/favorite-api.js';
 import { handleClearCache } from './apis/system-api.js';
 import { getRedisCaches, getRedisKey, pingRedis, setRedisKey, setRedisKeyWithExpiry, updateRedisCaches } from "./utils/redis-util.js";
@@ -47,9 +48,9 @@ import { apitestJsContent } from './ui/js/apitest.js';
 import { systemSettingsJsContent } from './ui/js/systemsettings.js';
 import { previewJsContent } from './ui/js/preview.js';
 import { convertToAsciiSum } from "./utils/codec-util.js";
-import { convertToDanmakuJson, handleDanmusLike } from "./utils/danmu-util.js";
+import { convertToDanmakuJson, handleDanmusLike, splitBlockedWords, parseBlockedWord } from "./utils/danmu-util.js";
 import { Segment, SegmentListResponse } from "./models/dandan-model.js"
-import { initBangumiData, searchBangumiData, clearBangumiDataCache } from "./utils/bangumi-data-util.js";
+import { initBangumiData, searchBangumiData, clearBangumiDataCache, dedupeBangumiSearchResults } from "./utils/bangumi-data-util.js";
 import { generateNipaplaySignature, parseNipaplayRelatedLinks, resolveNipaplayLink, applyShiftToDanmu } from "./utils/nipaplay-util.js";
 
 // Mock Request class for testing
@@ -629,6 +630,49 @@ test('worker.js API endpoints', async (t) => {
     resetSearchState();
   });
 
+  await t.test('BLOCKED_WORDS 屏蔽词解析与过滤', async () => {
+    const baseEnv = {
+      GROUP_MINUTE: '0',
+      DANMU_LIMIT: '0',
+      CONVERT_COLOR: 'default'
+    };
+    const sample = [
+      { timepoint: '1.00', ct: 1, color: 16777215, content: '前方剧透警告' },
+      { timepoint: '2.00', ct: 1, color: 16777215, content: '测试弹幕一' },
+      { timepoint: '3.00', ct: 1, color: 16777215, content: 'AD广告内容' },
+      { timepoint: '4.00', ct: 1, color: 16777215, content: '正常弹幕' },
+    ];
+
+    const filterWith = async (blockedWords, expectGone, expectKeep = ['正常弹幕']) => {
+      Globals.init({ ...baseEnv, BLOCKED_WORDS: blockedWords });
+      const out = await convertToDanmakuJson(structuredClone(sample), 'test');
+      const texts = out.map(d => d.m);
+      for (const word of expectGone) {
+        assert.ok(!texts.some(t => t.includes(word)), `「${word}」应被屏蔽，实际剩余: ${JSON.stringify(texts)}`);
+      }
+      for (const word of expectKeep) {
+        assert.ok(texts.some(t => t.includes(word)), `「${word}」不应被误屏蔽，实际剩余: ${JSON.stringify(texts)}`);
+      }
+    };
+
+    // 标准正则 / 纯文本词 / 全角逗号 / 正则带 i 标志 / 逗号带空格 / 混合写法
+    await filterWith('/剧透/,/广告/', ['剧透', '广告']);
+    await filterWith('剧透,广告', ['剧透', '广告']);
+    await filterWith('/剧透/，/广告/', ['剧透', '广告']);
+    await filterWith('/ad/i,/^测试/', ['AD广告', '测试']);
+    await filterWith('/剧透/, /广告/', ['剧透', '广告']);
+    await filterWith('/^测试/, 剧透 ，/广告/', ['剧透', '广告', '测试']);
+
+    // README 官方示例兼容性：应解析出 16 个正则且不抛错
+    const readmeSample = "/.{20,}/,/^\\d{2,4}[-/.]\\d{1,2}[-/.]\\d{1,2}([日号.]*)?$/,/^(?!哈+$)([a-zA-Z\\u4e00-\\u9fa5])\\1{2,}/,/[0-9]+\\.*[0-9]*\\s*(w|万)+\\s*(\\+|个|人|在看)+/,/^[a-z]{6,}$/,/^(?:qwertyuiop|asdfghjkl|zxcvbnm)$/,/^\\d{5,}$/,/^(\\d)\\1{2,}/,/^\\d{1,4}$/,/(20[0-3][0-9])/,/(0?[1-9]|1[0-2])月/,/\\d{1,2}[.-]\\d{1,2}/,/[@#&$%^*+\\|/\\-_=<>°◆◇■□●○★☆▼▲♥♦♠♣①②③④⑤⑥⑦⑧⑨⑩]/,/[一二三四五六七八九十百\\d]+刷/,/第[一二三四五六七八九十百\\d]+/,/(全体成员|报到|报道|来啦|签到|刷|打卡|我在|来了|考古|爱了|挖坟|留念|你好|回来|哦哦|重温|复习|重刷|再看|在看|前排|沙发|有人看|板凳|末排|我老婆|我老公|撅了|后排|周目|重看|包养|DVD|同上|同样|我也是|俺也|算我|爱豆|我家爱豆|我家哥哥|加我|三连|币|新人|入坑|补剧|冲了|硬了|看完|舔屏|万人|牛逼|煞笔|傻逼|卧槽|tm|啊这|哇哦)/";
+    const segs = splitBlockedWords(readmeSample);
+    assert.equal(segs.length, 16, `README 官方示例应解析出 16 条规则，实际 ${segs.length}`);
+    const regexes = segs.map(parseBlockedWord);
+    assert.ok(regexes.every(r => r instanceof RegExp), '所有词条均应解析为正则');
+
+    resetSearchState();
+  });
+
   await t.test('Upstash Redis persists favorites without storing search or comment caches', async () => {
     resetFavoriteState({
       UPSTASH_REDIS_REST_URL: 'https://redis.example.com',
@@ -1125,6 +1169,54 @@ test('worker.js API endpoints', async (t) => {
     });
   });
 
+  await t.test('stripLinkOffset 解析 @偏移 后缀（@秒数 / @%百分比 / 无偏移 / 合并链接仅取末段）', async () => {
+    assert.deepEqual(stripLinkOffset('https://x.com/v/1'), { cleanUrl: 'https://x.com/v/1', offset: 0, percent: false });
+    assert.deepEqual(stripLinkOffset('https://x.com/v/1@3197'), { cleanUrl: 'https://x.com/v/1', offset: 3197, percent: false });
+    assert.deepEqual(stripLinkOffset('https://x.com/v/1@%50'), { cleanUrl: 'https://x.com/v/1', offset: 50, percent: true });
+    assert.deepEqual(stripLinkOffset('https://x.com/v/1@-50'), { cleanUrl: 'https://x.com/v/1', offset: -50, percent: false });
+    // 合并链接仅从整条 URL 尾部取末段子链接的 @偏移
+    const merged = 'https://x.com/v/A$$$https://x.com/v/B@3197';
+    assert.deepEqual(stripLinkOffset(merged), { cleanUrl: 'https://x.com/v/A$$$https://x.com/v/B', offset: 3197, percent: false });
+    // 容错：非字符串入参不抛错
+    assert.deepEqual(stripLinkOffset(null), { cleanUrl: '', offset: 0, percent: false });
+  });
+
+  await t.test('applyOffset 应用 @偏移 的端点语义（绝对 = 时间+偏移，百分比端点 = 最大时间+偏移）', async () => {
+    const danmus = [{ p: '10,1,16777215,b' }, { p: '20,1,16777215,b' }];
+    // 绝对偏移：每条弹幕时间整体平移 offset 秒
+    assert.deepEqual(applyOffset(danmus, 50).map(d => d.p), ['60.00,1,16777215,b', '70.00,1,16777215,b']);
+    // 百分比偏移：按时间轴缩放，scaleRatio=(maxTime+offset)/maxTime，端点 maxTime → maxTime+offset
+    assert.deepEqual(applyOffset(danmus, 50, { usePercent: true, videoDuration: 20 }).map(d => d.p), ['35.00,1,16777215,b', '70.00,1,16777215,b']);
+    // 合并时长端点一致性：单链接时长 3266、偏移 3197 时，合并时间轴末端为 6463
+    assert.equal(applyOffset([{ t: 3266 }], 3197, { usePercent: false, videoDuration: 3266 })[0].t, 6463);
+  });
+    
+  // 测试 Bangumi Data 本地检索结果的同源去重
+  await t.test('dedupeBangumiSearchResults should dedupe same-source results and skip tmdb', () => {
+    const makeResult = (siteKey, siteId, titles) => ({ matchedSiteKey: siteKey, siteId, titles });
+
+    // 同源多条目：保留标题精确命中检索词的一条，其余标题并入别名
+    const merged = dedupeBangumiSearchResults([
+      makeResult('anidb', '19242', ['Re：从零开始的异世界生活 第四季 丧失篇(2026)']),
+      makeResult('anidb', '19242', ['Re：从零开始的异世界生活 第四季 夺还篇(2026)']),
+    ], 'Re：从零开始的异世界生活 第四季 夺还篇(2026)');
+    assert.equal(merged.length, 1, `Expected merged.length === 1, but got ${merged.length}`);
+    assert.equal(merged[0].titles[0], 'Re：从零开始的异世界生活 第四季 夺还篇(2026)');
+    assert.ok(merged[0].titles.includes('Re：从零开始的异世界生活 第四季 丧失篇(2026)'), 'Expected merged titles to include the secondary title');
+
+    // tmdb 不参与去重，同 id 多条均保留
+    const tmdbOnly = dedupeBangumiSearchResults([
+      makeResult('tmdb', '123', ['标题A']),
+      makeResult('tmdb', '123', ['标题B']),
+    ], '检索词');
+    assert.equal(tmdbOnly.length, 2, `Expected tmdbOnly.length === 2, but got ${tmdbOnly.length}`);
+
+    // 不同源 id 空间重叠（同 siteId 不同 matchedSiteKey）不合并
+    const crossSite = dedupeBangumiSearchResults([
+      makeResult('anidb', '19242', ['丧失篇']),
+      makeResult('bangumi', '19242', ['夺还篇']),
+    ], '检索词');
+    assert.equal(crossSite.length, 2, `Expected crossSite.length === 2, but got ${crossSite.length}`);
   });
 
   // await t.test('GET /api/v2/comment/:id?format=json&duration=true should return segment duration and reuse comment cache', async () => {

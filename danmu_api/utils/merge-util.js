@@ -473,7 +473,7 @@ function removeParentheses(text) {
  * @param {string} urlStr - 原始 URL 或 ID 字符串
  * @returns {string} 清洗后的单一 URL
  */
-function sanitizeUrl(urlStr) {
+export function sanitizeUrl(urlStr) {
     if (!urlStr) return '';
     let clean = String(urlStr).split(MERGE_DELIMITER)[0].trim();
     if (clean.startsWith('//')) return 'https:' + clean;

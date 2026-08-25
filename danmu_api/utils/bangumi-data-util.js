@@ -773,7 +773,44 @@ export async function searchBangumiData(keyword, siteKeys) {
             results.push(...additionalDubs);
         }
     }
-    return results;
+
+    return dedupeBangumiSearchResults(results, keyword);
+}
+
+// 对搜索结果精确匹配优先排序并按源去重，同源多条目保留标题精确命中检索词的一条、其余标题并入别名；tmdb 不分季且按标题消费，不参与去重
+export function dedupeBangumiSearchResults(results, keyword) {
+    let exactTerms = [keyword];
+    try {
+        exactTerms = [...new Set([keyword, simplized(keyword), traditionalized(keyword)])];
+    } catch (e) {}
+    results.sort((a, b) => {
+        const aExact = a.titles.some(t => t && exactTerms.includes(t));
+        const bExact = b.titles.some(t => t && exactTerms.includes(t));
+        if (aExact && !bExact) return -1;
+        if (!aExact && bExact) return 1;
+        return 0;
+    });
+
+    const dedupedResults = [];
+    const seenSourceIds = new Map();
+    for (const r of results) {
+        if (r.matchedSiteKey === 'tmdb') {
+            dedupedResults.push(r);
+            continue;
+        }
+        const dedupeKey = `${r.matchedSiteKey}:${r.siteId}`;
+        const keepIdx = seenSourceIds.get(dedupeKey);
+        if (keepIdx === undefined) {
+            seenSourceIds.set(dedupeKey, dedupedResults.length);
+            dedupedResults.push(r);
+        } else {
+            const kept = dedupedResults[keepIdx];
+            for (const t of r.titles) {
+                if (t && !kept.titles.includes(t)) kept.titles.push(t);
+            }
+        }
+    }
+    return dedupedResults;
 }
 
 /**
