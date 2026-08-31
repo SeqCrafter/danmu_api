@@ -351,14 +351,12 @@ export default class MangoSource extends BaseSource {
           } else {
             log("info", `[mango] 综艺过滤上中下格式+后缀: ${fullTitle}`);
           }
-        } else if (qiPureMatch && !hasUpMidDown && !/会员版|纯享版|特别版|独家版|加更|Plus|\+|花絮|预告|彩蛋|抢先|精选|未播|回顾|特辑|幕后|访谈|采访|混剪|合集|盘点|总结|删减|未播放|NG|番外|片段|看点|精彩|制作|导演|演员|拍摄|片尾曲|插曲|主题曲|背景音乐|OST|音乐|歌曲/.test(fullTitle)) {
-          // 匹配纯粹的"第N期"格式
+        } else if (qiPureMatch && !hasUpMidDown) {
+          // 无上/中/下后缀的纯"第N期"为正片, 直接收录; 主黑名单已在综艺处理前过滤了加更版/合伙人手记等特殊条目
           const qiNum = qiPureMatch[1];
           qiInfoMap.set(ep, [parseInt(qiNum), '']);
           episodeInfos.push(ep);
           log("info", `[mango] 综艺保留标准期数: ${fullTitle}`);
-        } else {
-          log("info", `[mango] 综艺过滤非标准期数格式: ${fullTitle}`);
         }
       } else {
         // 没有任何"第N期"格式时：全部保留（除了明显的广告）

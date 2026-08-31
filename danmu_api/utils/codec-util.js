@@ -18,8 +18,8 @@ export function simpleHash(str) {
 
 // 辅助函数：序列化值，处理 Map 对象
 export function serializeValue(key, value) {
-  // 对于 lastSelectMap（Map 对象），需要转换为普通对象后再序列化
-  if (key === 'lastSelectMap' && value instanceof Map) {
+  // Redis 中持久化的 Map 转成普通对象，避免 JSON.stringify(Map) 得到空对象。
+  if ((key === 'lastSelectMap' || key === 'favoriteCache') && value instanceof Map) {
     return JSON.stringify(Object.fromEntries(value));
   }
   return JSON.stringify(value);
@@ -802,7 +802,7 @@ export function stringToUtf8Bytes(str) {
 }
 
 // 修改后的 aesDecryptBase64
-function aesDecryptBase64(cipherB64, keyStr) {
+export function aesDecryptBase64(cipherB64, keyStr) {
   try {
     const cipherBytes = base64ToBytes(cipherB64);
     const keyBytes = stringToUtf8Bytes(keyStr);
@@ -878,7 +878,7 @@ export function bytesToBase64(bytes) {
 
 // ===================== SHA256 算法 =====================
 // 纯 JS SHA256，返回字节数组
-function sha256(ascii) {
+export function sha256(ascii) {
     function rightRotate(n, x) { return (x >>> n) | (x << (32 - n)); }
 
     let maxWord = Math.pow(2, 32);

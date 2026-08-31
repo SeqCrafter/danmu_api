@@ -1,13 +1,24 @@
 import { globals } from '../configs/globals.js';
 import { log } from './log-util.js'
 import { AsyncLocalStorage } from 'node:async_hooks';
+import https from 'node:https';
+import http from 'node:http';
 
 // 跨异步生命周期链路的日志上下文追踪器
 export const sourceLogContext = new AsyncLocalStorage();
 
+// 单次搜索请求内的 HTTP 响应复用缓存: 相同 URL 的重复 GET 直接复用, 借助 AsyncLocalStorage 实现请求级隔离
+export const httpCacheContext = new AsyncLocalStorage();
+
+export function runWithHttpCache(fn) {
+  return httpCacheContext.run(new Map(), fn);
+}
+
 // 源调度键名（sourceOrderArr）到日志标签规范名称的映射
 // sourceOrderArr 中部分键名与对应源文件的标签命名不一致（如 360→360kan, imgo→mango）
-// 此映射表统一转换，确保 HTTP 日志标签与源文件内部标签一致
+// 此映射表为本地 fallback，与 sources/registry.js 的 logName 字段保持一致。
+// 注意：http-util.js 是各源依赖的底层工具，不可反向 import registry（会形成
+// http-util → registry → 各源 → http-util 的静态循环依赖），故保留本地表。
 const SOURCE_KEY_TO_LOG_NAME = {
   '360': '360kan',
   'imgo': 'mango',
@@ -52,9 +63,50 @@ function linkSignal(externalSignal, internalController) {
   };
 }
 
+const IS_NODE_RUNTIME = globalThis.__FORWARD_WIDGET__ !== true
+  && typeof process !== 'undefined'
+  && Boolean(process.versions?.node);
+
+// 旧版 Node（<20.19.0，自带 undici 解析响应头时丢弃 Set-Cookie）与 iOS 巨魔（无 WebAssembly、无原生 fetch）改用 node-fetch v3（其 Headers 正常暴露 Set-Cookie）；降级边界与 esm-shim 的 20.19.0 一致，Node >= 20.19.0 仍用原生 fetch。判定仅依赖静态环境、进程内恒定，故模块加载时算一次并缓存。
+function detectNodeFetchDowngrade() {
+  if (!IS_NODE_RUNTIME) return typeof WebAssembly === 'undefined';
+  const [major, minor] = process.versions.node.split('.').map(Number);
+  return major < 20 || (major === 20 && minor < 19);
+}
+
+const USE_NODE_FETCH = detectNodeFetchDowngrade();
+if (USE_NODE_FETCH) {
+  // 模块载入时 logLevel 尚未初始化，用 console.log 保证启动提示必现
+  console.log("[system] [http] 检测到旧版Node/iOS环境，已全局切换至 node-fetch v3 作为请求实现");
+}
+
+// 降级分支共享 keep-alive Agent，复用 TCP/TLS 连接以与原生 undici 连接池达到实际等价（消除重复握手开销）；按协议区分 https/http
+const nodeFetchHttpsAgent = USE_NODE_FETCH && IS_NODE_RUNTIME ? new https.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 256 }) : null;
+const nodeFetchHttpAgent = USE_NODE_FETCH && IS_NODE_RUNTIME ? new http.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 256 }) : null;
+function nodeFetchAgent(parsedUrl) {
+  const protocol = parsedUrl instanceof URL ? parsedUrl.protocol : new URL(parsedUrl).protocol;
+  return protocol === 'https:' ? nodeFetchHttpsAgent : nodeFetchHttpAgent;
+}
+
+function shouldUseNodeFetch() {
+  return USE_NODE_FETCH;
+}
+
 export async function httpGet(url, options = {}) {
+  // 单次搜索请求内 HTTP 响应复用: 若当前请求上下文已激活复用缓存且本 URL 已缓存, 直接返回克隆结果, 跳过重复网络请求
+  const requestHttpCache = httpCacheContext.getStore();
+  // 重试调用传入 bypassCache 时跳过复用，避免复用首次已缓存的失败响应而令重试被静默吞掉
+  const bypassCache = options.bypassCache === true;
+  if (requestHttpCache && !bypassCache && requestHttpCache.has(url)) {
+    const cached = requestHttpCache.get(url);
+    log("info", `[${sourceLogContext.getStore() || 'system'}] [请求复用] 复用请求内已缓存的 HTTP 响应, 跳过重复请求: ${url}`);
+    return { data: structuredClone(cached.data), status: cached.status, headers: { ...cached.headers } };
+  }
+
   // 从 options 中获取重试次数，默认为 0
   const maxRetries = parseInt(options.retries || '0', 10) || 0;
+  // GET 与 POST 行为保持一致：默认跟随重定向，allow_redirects 为 false 时禁止（用于截获 302 Location）
+  const allow_redirects = options.allow_redirects !== false;
   // 提取允许放行的特定状态码白名单
   const validStatusCodes = Array.isArray(options.validStatusCodes) ? options.validStatusCodes : [];
   let lastError;
@@ -86,17 +138,18 @@ export async function httpGet(url, options = {}) {
     const cleanupSignal = linkSignal(options.signal, controller);
 
     try {
-      // 兼容iOS巨魔环境：使用node-fetch替代内置fetch
+      // 兼容iOS巨魔或旧版Node：使用node-fetch替代内置fetch
       let response;
-      if (typeof WebAssembly === 'undefined') {
-        log("info", "[system] [http] iOS环境降级使用node-fetch");
+      if (shouldUseNodeFetch()) {
         const fetch = (await import('node-fetch')).default;
         response = await fetch(url, {
           method: 'GET',
           headers: {
             ...options.headers,
           },
-          signal: controller.signal
+          signal: controller.signal,
+          agent: nodeFetchAgent,
+          redirect: allow_redirects ? 'follow' : 'manual'
         });
       } else {
         // 现代浏览器环境
@@ -105,7 +158,8 @@ export async function httpGet(url, options = {}) {
           headers: {
             ...options.headers,
           },
-          signal: controller.signal
+          signal: controller.signal,
+          redirect: allow_redirects ? 'follow' : 'manual'
         });
       }
 
@@ -172,7 +226,18 @@ export async function httpGet(url, options = {}) {
 
         data = decodedData; // 更新解压后的数据
       } else {
-        data = await response.text();
+        // 个别旧站点（如搜狐 videolist）仍返回 GBK；调用方可显式指定编码。
+        if (options.encoding) {
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          let encoding = options.encoding;
+          if (encoding === 'auto') {
+            const contentType = response.headers.get('content-type') || '';
+            encoding = /charset\s*=\s*(gbk|gb2312|big5)/i.exec(contentType)?.[1] || 'utf-8';
+          }
+          data = new TextDecoder(encoding).decode(bytes);
+        } else {
+          data = await response.text();
+        }
       }
 
       let parsedData;
@@ -203,6 +268,11 @@ export async function httpGet(url, options = {}) {
       // 请求成功，返回结果
       if (attempt > 0) {
         log("info", `[${currentSource}] [请求模拟] 重试成功`);
+      }
+
+      // 将本次响应记入请求内复用缓存, 供同请求内相同 URL 的后续请求直接复用
+      if (requestHttpCache && !bypassCache) {
+        requestHttpCache.set(url, { data: structuredClone(parsedData), status: response.status, headers });
       }
 
       // 模拟 iOS 环境：返回 { data: ... } 结构
@@ -306,12 +376,11 @@ export async function httpPost(url, body, options = {}) {
     }
 
     try {
-      // 兼容iOS巨魔环境：使用node-fetch替代内置fetch
+      // 兼容iOS巨魔或旧版Node：使用node-fetch替代内置fetch
       let response;
-      if (typeof WebAssembly === 'undefined') {
-        log("info", "[system] [http] iOS环境降级使用node-fetch");
+      if (shouldUseNodeFetch()) {
         const fetch = (await import('node-fetch')).default;
-        response = await fetch(url, fetchOptions);
+        response = await fetch(url, { ...fetchOptions, agent: nodeFetchAgent });
       } else {
         // 现代浏览器环境
         response = await fetch(url, fetchOptions);
@@ -430,7 +499,14 @@ async function httpRequestMethod(method, url, body, options = {}) {
   }
 
   try {
-    const response = await fetch(url, fetchOptions);
+    // 兼容iOS巨魔或旧版Node：使用node-fetch替代内置fetch
+    let response;
+    if (shouldUseNodeFetch()) {
+      const fetch = (await import('node-fetch')).default;
+      response = await fetch(url, { ...fetchOptions, agent: nodeFetchAgent });
+    } else {
+      response = await fetch(url, fetchOptions);
+    }
     const textData = await response.text();
 
     if (!response.ok && !validStatusCodes.includes(response.status)) {
@@ -690,11 +766,23 @@ export async function httpGetWithStreamCheck(url, options = {}, checkCallback) {
     const currentSource = sourceLogContext.getStore() || "system";
     log("info", `[${currentSource}] [流式请求] HTTP GET: ${url}`);
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: headers,
-      signal: controller.signal
-    });
+    // 兼容iOS巨魔或旧版Node：使用node-fetch替代内置fetch
+    let response;
+    if (shouldUseNodeFetch()) {
+      const fetch = (await import('node-fetch')).default;
+      response = await fetch(url, {
+        method: 'GET',
+        headers: headers,
+        signal: controller.signal,
+        agent: nodeFetchAgent
+      });
+    } else {
+      response = await fetch(url, {
+        method: 'GET',
+        headers: headers,
+        signal: controller.signal
+      });
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);

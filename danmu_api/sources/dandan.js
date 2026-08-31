@@ -2,6 +2,7 @@ import BaseSource from './base.js';
 import { globals } from '../configs/globals.js';
 import { log } from "../utils/log-util.js";
 import { httpGet } from "../utils/http-util.js";
+import { fetchNipaplayRelatedLinks, resolveNipaplayLink, applyShiftToDanmu } from '../utils/nipaplay-util.js';
 import { addAnime, removeEarliestAnime } from "../utils/cache-util.js";
 import { SegmentListResponse } from '../models/dandan-model.js';
 import { getTmdbJaOriginalTitle, smartTitleReplace } from "../utils/tmdb-util.js";
@@ -22,6 +23,99 @@ const youkuSource = new YoukuSource();
 const bahamutSource = new BahamutSource();
 
 const DandanUserAgent = `LogVar Danmu API/${globals.version}`
+
+// 源标识 → 平台标识映射，与核心路由一致（见 ALLOWED_PLATFORMS：bilibili1/qq/qiyi/imgo 等），
+// 使 弹弹302关联弹幕经 convertToDanmakuJson 输出正确的 [平台] 标签，而非 [dandan] 或源名。
+const SOURCE_TO_PLATFORM = {
+  bilibili: 'bilibili1',
+  bahamut: 'bahamut',
+  iqiyi: 'qiyi',
+  youku: 'youku',
+  tencent: 'qq',
+  imgo: 'imgo',
+};
+
+// 汇总跨平台实时弹幕，复用核心路由同款链接解析（gamer→sn）与各源既有 formatComments，
+// 使每源入参与核心路由一致；按平台标识跳过已独立选择的合并源以免重复；每条弹幕按真实来源
+// 平台打 _sourceLabel，且同平台多个链接串行、间隔 1 秒请求，与手动解析链接防风控一致。
+export async function getRelatedDanmuViaNipaplay(episodeId, coveredSources) {
+  const links = await fetchNipaplayRelatedLinks(episodeId);
+  if (!links) return [];
+  const summary = Object.entries(links)
+    .filter(([, arr]) => arr && arr.length)
+    .map(([p, arr]) => `${SOURCE_TO_PLATFORM[p] || p}×${arr.length}`)
+    .join(', ');
+  if (summary) log("info", `[dandan] nipaplay 弹弹302关联兜底提取到弹弹302关联链接: ${summary}`);
+  const sourceMap = {
+    bilibili: bilibiliSource,
+    bahamut: bahamutSource,
+    iqiyi: iqiyiSource,
+    youku: youkuSource,
+    tencent: tencentSource,
+    imgo: mangoSource,
+  };
+  // 收集待拉取任务（按平台标识分组以便同平台串行），已独立选择的合并源跳过。
+  const pending = [];
+  const skipped = [];
+  for (const [platform, linksOfPlatform] of Object.entries(links)) {
+    if (!linksOfPlatform || linksOfPlatform.length === 0) continue;
+    const platformLabel = SOURCE_TO_PLATFORM[platform];
+    if (!platformLabel || coveredSources.has(platform) || coveredSources.has(platformLabel)) {
+      if (platformLabel) skipped.push(platformLabel);
+      continue;
+    }
+    const sourceInstance = sourceMap[platform];
+    if (!sourceInstance) continue;
+    for (const { url, shift } of linksOfPlatform) {
+      const { source, realId } = resolveNipaplayLink(url);
+      if (source !== platform) {
+        log("info", `[dandan] nipaplay 弹弹302关联链接平台解析不一致，声明 ${platform} 实得 ${source}，跳过: ${url}`);
+        continue;
+      }
+      pending.push({
+        platformLabel,
+        run: () => sourceInstance.getEpisodeDanmu(realId, [])
+          .then((raw) => sourceInstance.formatComments(raw || []).map((d) => applyShiftToDanmu({ ...d, _sourceLabel: platformLabel }, shift)))
+          .catch((e) => { log("error", `[dandan] nipaplay 弹弹302关联拉取 ${platformLabel} 失败: ${e.message}`); return []; }),
+      });
+    }
+  }
+  if (skipped.length) log("info", `[dandan] nipaplay 弹弹302关联兜底跳过已合并源（避免重复拉取）: ${skipped.join(', ')}`);
+  // 同平台串行、间隔 1 秒，不同平台并行（防风控，同 PR #388 手动解析链接）。
+  const groups = new Map();
+  for (const task of pending) {
+    if (!groups.has(task.platformLabel)) groups.set(task.platformLabel, []);
+    groups.get(task.platformLabel).push(task.run);
+  }
+  const results = await Promise.all(Array.from(groups.values()).map(async (runs) => {
+    const items = [];
+    for (let i = 0; i < runs.length; i++) {
+      // 每个任务返回单链接弹幕数组，展开后 items 为本平台串行汇总，便于最终 flat 拉平为单条弹幕。
+      items.push(...await runs[i]());
+      if (i < runs.length - 1) await new Promise((r) => setTimeout(r, 1000));
+    }
+    return items;
+  }));
+  return results.flat().filter(Boolean);
+}
+
+// 请求弹弹play原生弹幕；失败时返回空数组，使后续 nipaplay 弹弹302关联兜底或安全网回退不受阻断。
+async function fetchDandanComments(id) {
+  try {
+    const resp = await httpGet(`https://api.danmaku.weeblify.app/ddp/v1?path=%2Fv2%2Fcomment%2F${id}%3Ffrom%3D0%26withRelated%3Dtrue%26chConvert%3D0`, {
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": DandanUserAgent,
+      },
+      retries: 1,
+    });
+    if (resp && resp.data && resp.data.comments) return resp.data.comments;
+    return [];
+  } catch (e) {
+    log("error", `[dandan] dandan base comments error: ${e.message}`);
+    return [];
+  }
+}
 
 // =====================
 // 获取弹弹play弹幕
@@ -85,9 +179,6 @@ export default class DandanSource extends BaseSource {
             log("info", "[dandan] 原始搜索成功，但未返回任何结果 (source: original)");
             return { success: false, source: 'original' };
           }
-
-          // 原始搜索有结果，中断 TMDB 流程
-          tmdbAbortController.abort();
           const animes = resp.data.animes;
           log("info", `[dandan] dandanSearchresp (original): ${JSON.stringify(animes)}`);
           log("info", `[dandan] 返回 ${animes.length} 条结果 (source: original)`);
@@ -165,20 +256,35 @@ export default class DandanSource extends BaseSource {
         }
       })();
 
-      // 等待两个搜索任务同时完成，优先采用原始搜索结果
-      const [originalResult, tmdbResult] = await Promise.all([
-        originalSearchPromise,
-        tmdbSearchPromise
-      ]);
-
-      // 优先返回原始搜索结果
+      // 搜索结果预过滤：先拿到原始结果再决定是否等待TMDB兜底
+      const originalResult = await originalSearchPromise;
       if (originalResult.success) {
-        return originalResult.data;
+        const resolvedSeason = getExplicitSeasonNumber(keyword);
+        const preFiltered = originalResult.data.filter(anime => {
+          if (anime.isTmdbSource) return true;
+          const t = anime.animeTitle || anime.title || '';
+          return titleMatches(t, keyword, resolvedSeason, true, 0.8);
+        });
+        if (preFiltered.length > 0) {
+          tmdbAbortController.abort();
+          // 记录原始搜索结果的全部animeId，供handleAnimes关联作品恢复误过滤条目使用
+          preFiltered._originalAnimeIds = originalResult.data.map(a => a.animeId);
+          return preFiltered;
+        }
+        // 初筛清空原始结果时不abort，等待TMDB兜底
       }
 
-      // 原始搜索无结果，返回 TMDB 搜索结果
+      // 原始搜索无结果或被初筛清空，等待并返回TMDB搜索结果
+      const tmdbResult = await tmdbSearchPromise;
+
+      // 原始搜索无结果，对TMDB日语原名结果做最终预过滤
       if (tmdbResult.success) {
-        return tmdbResult.data;
+        const resolvedSeason = getExplicitSeasonNumber(keyword);
+        const tmdbFiltered = tmdbResult.data.filter(anime => {
+          const t = anime.animeTitle || anime.title || '';
+          return titleMatches(t, keyword, resolvedSeason, true, 0.19);
+        });
+        if (tmdbFiltered.length > 0) return tmdbFiltered;
       }
 
       log("info", `[dandan] 原始搜索和基于TMDB的搜索均未返回任何结果 (当前搜索词: ${keyword})`);
@@ -394,6 +500,36 @@ export default class DandanSource extends BaseSource {
                 }
               }
             }
+
+            // 关联作品补回预过滤误剔除的原始搜索结果条目（如翻译差异导致误过滤）
+            if (!isTargetFoundInInitial && Array.isArray(details.relateds)) {
+              const originalIds = sourceAnimes._originalAnimeIds;
+              if (Array.isArray(originalIds) && originalIds.length > 0) {
+                const recoveredIds = new Set(originalIds);
+                for (const rel of details.relateds) {
+                  if (recoveredIds.has(rel.animeId) && !existingIds.has(rel.animeId)) {
+                    existingIds.add(rel.animeId);
+                    if (!sourceAnimes.some(a => a.animeId === rel.animeId)) {
+                      sourceAnimes.push({
+                        animeId: rel.animeId,
+                        animeTitle: rel.animeTitle,
+                        title: rel.animeTitle,
+                        imageUrl: rel.imageUrl,
+                        rating: rel.rating || 0,
+                        isRelated: true
+                      });
+                    }
+                    queue.push({
+                      animeId: rel.animeId,
+                      animeTitle: rel.animeTitle,
+                      imageUrl: rel.imageUrl,
+                      rating: rel.rating || 0,
+                      isRelated: true // 标记动态挖掘出的条目为相关作品
+                    });
+                  }
+                }
+              }
+            }
           }
 
           // 区分初始搜索结果与动态相关作品的结果过滤逻辑
@@ -500,27 +636,37 @@ export default class DandanSource extends BaseSource {
   // 接收 mergedSources 参数，包含所有参与合并的具体源链接信息，用于避免重复获取
   async getEpisodeDanmu(id, mergedSources = []) {
     let allDanmus = [];
-    const stats = {}; // 统计各源弹幕数量
+    const coveredSources = new Set((mergedSources || []).map((m) => {
+      const src = typeof m === 'string' ? m.split(':')[0] : m?.logicalSource;
+      return src || '';
+    }).filter(Boolean));
 
     try {
-      // 获取 dandan 弹幕
-      const dandanPromise = httpGet(`https://api.danmaku.weeblify.app/ddp/v1?path=%2Fv2%2Fcomment%2F${id}%3Ffrom%3D0%26withRelated%3Dtrue%26chConvert%3D0`, {
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": DandanUserAgent,
-        },
-        retries: 1,
-      }).catch(e => { log('error', `[dandan] dandan base comments error: ${e.message}`); return null; });
-
-      const resp = await dandanPromise;
-
-      if (resp && resp.data && resp.data.comments) {
-        allDanmus = resp.data.comments;
-        stats['dandan'] = allDanmus.length;
+      if (globals.nipaplayReplaceDandan) {
+        // NIPAPLAY_REPLACE_DANDAN 开启：以 nipaplay 弹弹302关联弹幕替代弹弹原生弹幕，避免两者并行请求；
+        // 弹弹302关联链接为空时回退弹弹自身弹幕作为安全网。
+        const related = await getRelatedDanmuViaNipaplay(id, coveredSources);
+        if (related.length > 0) {
+          allDanmus = related;
+          log("info", `[dandan] NIPAPLAY_REPLACE_DANDAN 启用，nipaplay 弹弹302关联弹幕替代弹弹原生弹幕（${related.length} 条）`);
+        } else {
+          log("info", '[dandan] NIPAPLAY_REPLACE_DANDAN 弹弹302关联链接为空，回退弹弹自身弹幕');
+          allDanmus = await fetchDandanComments(id);
+        }
       } else {
-        stats['dandan'] = 0;
+        // 默认：先取弹弹原生弹幕，为空时再借 nipaplayv1 弹弹302关联链接兜底拉取跨平台实时弹幕。
+        allDanmus = await fetchDandanComments(id);
+        if (allDanmus.length === 0) {
+          log("info", '[dandan] dandan 原生弹幕为空，触发 NipaPlay 弹弹302关联兜底');
+          const related = await getRelatedDanmuViaNipaplay(id, coveredSources);
+          if (related.length > 0) {
+            allDanmus = related;
+            log("info", `[dandan] nipaplay 弹弹302关联兜底补充 ${related.length} 条跨平台弹幕`);
+          } else {
+            log("info", '[dandan] nipaplay 弹弹302关联兜底未获取到跨平台弹幕');
+          }
+        }
       }
-
     } catch (error) {
       log("error", "[dandan] getEpisodeDanmu error:", {
         message: error.message,

@@ -1,7 +1,7 @@
 import { normalizeSpaces } from './common-util.js';
 
 // 弹幕时间偏移独立模块
-// 职责：解析偏移规则、匹配偏移量、应用偏移到弹幕
+// 职责：解析链接 @偏移 与偏移规则、匹配偏移量、应用偏移到弹幕
 
 // 来源→平台别名映射（source 名和 platform 名不一致时扩展匹配）
 const SOURCE_ALIASES = {
@@ -262,4 +262,22 @@ export function applyOffset(danmus, offsetSeconds, options = {}) {
 
     return updated;
   });
+}
+
+/**
+ * 从播放链接尾部解析 @偏移 后缀（@秒数 / @%百分比），返回剥离后的洁净链接与偏移参数
+ * @param {string} rawUrl 原始链接
+ * @returns {{cleanUrl: string, offset: number, percent: boolean}} 洁净链接、偏移秒数、是否百分比
+ */
+export function stripLinkOffset(rawUrl) {
+  const url = String(rawUrl ?? '');
+  const percentMatch = url.match(/@%(-?\d+(?:\.\d+)?)$/);
+  if (percentMatch) {
+    return { cleanUrl: url.substring(0, url.length - percentMatch[0].length), offset: parseFloat(percentMatch[1]), percent: true };
+  }
+  const offsetMatch = url.match(/@(-?\d+(?:\.\d+)?)$/);
+  if (offsetMatch) {
+    return { cleanUrl: url.substring(0, url.length - offsetMatch[0].length), offset: parseFloat(offsetMatch[1]), percent: false };
+  }
+  return { cleanUrl: url, offset: 0, percent: false };
 }

@@ -18,12 +18,12 @@ let downloadLockTime = 0;
 let memoryFootprintMB = '0.00';
 let hasLoggedCacheWarning = false;
 let charInvertedIndex = new Map();
+let currentBackgroundDownload = null; // 在途后台下载 Promise：由 initBangumiData 在发起非阻塞刷新时写入，供边缘层 ctx.waitUntil 延长 Serverless 生命周期
 
-// 当前生效的数据源标识 ('custom' | 'official')
-let activeDataSource = 'custom';
-// 缓存已解析的版本号（进程内有效）
-let cachedCustomVersion = null;
+let activeDataSource = 'custom'; // 当前生效的数据源标识 ('custom' | 'official')
+let cachedCustomVersion = null; // 缓存已解析的版本号（进程内有效）
 let cachedOfficialVersion = null;
+let versionQueryPromise = null; // 版本查询并发锁：serverless环境下冻结时异步信号可能不生效，共享同一Promise避免重复探测
 
 // 定义缓存目录/文件名
 const CACHE_DIR = path.join(process.cwd(), '.cache');
@@ -103,7 +103,8 @@ function parseSemanticVersion(versionStr) {
 
 /**
  * 比较两个语义化版本号
- * 标准-semver 逐段数值比较
+ * 自定义版本格式 upstreamPatch*100+internalRev（patch≥1000时识别），
+ * 比较时还原为上游追踪版本以保证与官方版本号的正确对比
  * @param {string} verA 版本A
  * @param {string} verB 版本B
  * @returns {number} 正数表示 A>B, 负数表示 A<B, 0 表示相等
@@ -115,27 +116,32 @@ function compareVersions(verA, verB) {
 
     if (a.major !== b.major) return a.major - b.major;
     if (a.minor !== b.minor) return a.minor - b.minor;
-    if (a.patch !== b.patch) return a.patch - b.patch;
+
+    const patchA = a.patch >= 1000 ? Math.floor(a.patch / 100) : a.patch;
+    const patchB = b.patch >= 1000 ? Math.floor(b.patch / 100) : b.patch;
+    if (patchA !== patchB) return patchA - patchB;
 
     return 0;
 }
 
 /**
- * 从 npm registry 查询包的最新版本号
+ * 通过 CDN HEAD 请求获取包的精确版本号
+ * 利用 jsDelivr CDN 的 x-jsd-version 响应头提取模糊版号 @0.3 解析后的精确版本，
+ * HEAD 请求仅传输报头不传输数据体，比 NPM Registry API 轻量且不受限流影响
  * @param {string} packageName npm 包名
  * @returns {Promise<string|null>} 版本号或 null
  */
-async function fetchNpmLatestVersion(packageName) {
+async function fetchCdnLatestVersion(packageName) {
     try {
-        const url = `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`;
-        log("info", `[system] [请求模拟] HTTP GET: ${url}`);
+        const url = `https://cdn.jsdelivr.net/npm/${encodeURIComponent(packageName)}@0.3/dist/data.json`;
+        log("info", `[system] [请求模拟] HTTP HEAD: ${url}`);
         const response = await fetch(url, {
-            headers: { 'Accept': 'application/json' },
+            method: 'HEAD',
+            headers: { 'Accept': '*/*' },
             signal: AbortSignal.timeout(8000)
         });
         if (!response.ok) return null;
-        const data = await response.json();
-        return data?.version || null;
+        return response.headers.get('x-jsd-version') || null;
     } catch (e) {
         log("warn", `[system] [Bangumi-Data] 查询 ${packageName} 版本号失败: ${e.message}`);
         return null;
@@ -153,10 +159,13 @@ async function fetchNpmLatestVersion(packageName) {
  * @returns {Promise<'custom'|'official'>} 应使用的数据源标识
  */
 async function selectBestDataSource() {
+    // 复用已在进行中的版本查询Promise，避免serverless冻结恢复后重复HEAD探测
+    if (versionQueryPromise) return versionQueryPromise;
+    versionQueryPromise = (async () => {
     try {
         const [customVer, officialVer] = await Promise.all([
-            cachedCustomVersion || fetchNpmLatestVersion(CUSTOM_PACKAGE),
-            cachedOfficialVersion || fetchNpmLatestVersion(OFFICIAL_PACKAGE)
+            cachedCustomVersion || fetchCdnLatestVersion(CUSTOM_PACKAGE),
+            cachedOfficialVersion || fetchCdnLatestVersion(OFFICIAL_PACKAGE)
         ]);
 
         if (customVer) cachedCustomVersion = customVer;
@@ -177,6 +186,49 @@ async function selectBestDataSource() {
         log("warn", `[system] [Bangumi-Data] 数据源选择异常，回退到自定义源: ${e.message}`);
         return 'custom';
     }
+    })();
+    versionQueryPromise.finally(() => { versionQueryPromise = null; });
+    return versionQueryPromise;
+}
+
+// 数据下载触发时机：仅在 searchBangumiData 消费路径进入时触发下载；开关关闭或无所消费源时不下载
+// 开启时复用 initBangumiData 加载/下载，并发调用等待同一就绪缓存而不重复请求
+export async function ensureBangumiDataReady(deployPlatform = globals.deployPlatform) {
+    if (!globals.useBangumiData) return;
+    await initBangumiData(deployPlatform, true);
+}
+
+// 配置变更后同步 Bangumi Data 生命周期：开关开启立即下载（已缓存则幂等），关闭释放缓存
+// 调用前须保证 globals.useBangumiData 已反映最新配置（watcher 场景须先同步内存开关）
+export function syncBangumiDataLifecycleOnConfigChange(deployPlatform = globals.deployPlatform) {
+    if (globals.useBangumiData) {
+        initBangumiData(deployPlatform, true).catch(console.error);
+    } else {
+        clearBangumiDataCache(true);
+    }
+}
+
+// 读取在途后台下载 Promise，供边缘运行时在请求响应后延长生命周期（无在途时返回 null）
+export function getBackgroundDownload() {
+    return currentBackgroundDownload;
+}
+
+// 边缘运行时在响应返回后延长生命周期：仅在存在在途后台下载且运行时提供 waitUntil 时注册
+export function extendBangumiDownloadLifecycle(ctx) {
+    if (ctx && typeof ctx.waitUntil === 'function' && currentBackgroundDownload) {
+        ctx.waitUntil(currentBackgroundDownload);
+    }
+}
+
+// 发起后台静默下载并记录在途 Promise：下载完成时复位状态，供 getBackgroundDownload 暴露给边缘层
+function startDownload(cachePath) {
+    isDownloading = true;
+    downloadLockTime = Date.now();
+    currentBackgroundDownload = downloadAndCache(cachePath).finally(() => {
+        isDownloading = false;
+        currentBackgroundDownload = null;
+    });
+    return currentBackgroundDownload;
 }
 
 /**
@@ -187,7 +239,7 @@ async function selectBestDataSource() {
  * @param {boolean} isDataDependentRequest - 当前是否为强依赖数据的核心接口请求
  * @returns {Promise<void>}
  */
-export async function initBangumiData(deployPlatform, isDataDependentRequest = false, ctx = null) {
+export async function initBangumiData(deployPlatform, isDataDependentRequest = false) {
     if (!globals.useBangumiData) return;
 
     let cachePath = null;
@@ -223,9 +275,7 @@ export async function initBangumiData(deployPlatform, isDataDependentRequest = f
         // 当内存过期或配置强制更新时，仅在核心请求触发后台静默更新
         if (isDataDependentRequest && !isDownloading) {
             log("info", `[system] [Bangumi-Data] 内存数据${cacheDays === 0 ? '强制更新' : '已过期'}，保留老数据服务本次请求，启动后台静默更新...`);
-            isDownloading = true;
-            downloadLockTime = Date.now();
-            downloadAndCache(cachePath).finally(() => { isDownloading = false; });
+            startDownload(cachePath);
         }
         return;
     }
@@ -260,9 +310,7 @@ export async function initBangumiData(deployPlatform, isDataDependentRequest = f
             if (cacheDays === 0 || (Date.now() - stats.mtimeMs >= expireMs)) {
                 if (isDataDependentRequest && !isDownloading) {
                     log("info", `[system] [Bangumi-Data] 磁盘数据${cacheDays === 0 ? '强制更新' : '已过期'}，保留老数据服务本次请求，启动后台静默更新...`);
-                    isDownloading = true;
-                    downloadLockTime = Date.now();
-                    downloadAndCache(cachePath).finally(() => { isDownloading = false; });
+                    startDownload(cachePath);
                 }
             }
             return;
@@ -275,19 +323,13 @@ export async function initBangumiData(deployPlatform, isDataDependentRequest = f
     // 内存与磁盘均无有效数据时的获取逻辑
     if (!isDownloading) {
         log("info", `[system] [Bangumi-Data] 未命中任何有效缓存，正在获取基础数据...`);
-        isDownloading = true;
-        downloadLockTime = Date.now();
 
-        const downloadPromise = downloadAndCache(cachePath).finally(() => { isDownloading = false; });
+        const downloadPromise = startDownload(cachePath);
 
         if (isDataDependentRequest) {
             await downloadPromise; 
         } else {
             log("info", `[system] [Bangumi-Data] 当前非核心请求，数据获取转入后台异步执行`);
-            if (ctx && typeof ctx.waitUntil === 'function') {
-                log("info", `[system] [Bangumi-Data] 调用 ctx.waitUntil 延长 Serverless 生命周期`);
-                ctx.waitUntil(downloadPromise);
-            }
         }
     } else if (isDataDependentRequest) {
         log("info", `[system] [Bangumi-Data] 正在等待基础数据下载完成...`);
@@ -489,6 +531,7 @@ async function downloadAndCache(cachePath) {
  * @returns {Array<Object>} 匹配的动漫条目数组
  */
 export async function searchBangumiData(keyword, siteKeys) {
+    await ensureBangumiDataReady();
     if (!memoryCache || !memoryCache.items) return [];
 
     let searchPromise = queryCache.get(keyword);
@@ -730,7 +773,44 @@ export async function searchBangumiData(keyword, siteKeys) {
             results.push(...additionalDubs);
         }
     }
-    return results;
+
+    return dedupeBangumiSearchResults(results, keyword);
+}
+
+// 对搜索结果精确匹配优先排序并按源去重，同源多条目保留标题精确命中检索词的一条、其余标题并入别名；tmdb 不分季且按标题消费，不参与去重
+export function dedupeBangumiSearchResults(results, keyword) {
+    let exactTerms = [keyword];
+    try {
+        exactTerms = [...new Set([keyword, simplized(keyword), traditionalized(keyword)])];
+    } catch (e) {}
+    results.sort((a, b) => {
+        const aExact = a.titles.some(t => t && exactTerms.includes(t));
+        const bExact = b.titles.some(t => t && exactTerms.includes(t));
+        if (aExact && !bExact) return -1;
+        if (!aExact && bExact) return 1;
+        return 0;
+    });
+
+    const dedupedResults = [];
+    const seenSourceIds = new Map();
+    for (const r of results) {
+        if (r.matchedSiteKey === 'tmdb') {
+            dedupedResults.push(r);
+            continue;
+        }
+        const dedupeKey = `${r.matchedSiteKey}:${r.siteId}`;
+        const keepIdx = seenSourceIds.get(dedupeKey);
+        if (keepIdx === undefined) {
+            seenSourceIds.set(dedupeKey, dedupedResults.length);
+            dedupedResults.push(r);
+        } else {
+            const kept = dedupedResults[keepIdx];
+            for (const t of r.titles) {
+                if (t && !kept.titles.includes(t)) kept.titles.push(t);
+            }
+        }
+    }
+    return dedupedResults;
 }
 
 /**

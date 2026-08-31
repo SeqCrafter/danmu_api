@@ -56,14 +56,15 @@ export default class IqiyiSource extends BaseSource {
       const queryString = buildQueryString(params);
       const url = `https://mesh.if.iqiyi.com/portal/lw/search/homePageV3?${queryString}`;
 
-      const doSearch = async () => {
+      const doSearch = async (bypassCache = false) => {
         const resp = await httpGet(url, {
           headers: {
             'accept': '*/*',
             'origin': 'https://www.iqiyi.com',
             'referer': 'https://www.iqiyi.com/',
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-          }
+          },
+          bypassCache
         });
         if (!resp || !resp.data) return null;
         return typeof resp.data === "string" ? JSON.parse(resp.data) : resp.data;
@@ -76,7 +77,7 @@ export default class IqiyiSource extends BaseSource {
         const reason = !data ? "搜索响应为空" : `搜索接口风控 (code=${data.code})`;
         log("info", `[iqiyi] ${reason}，等待 3 秒后重试 (${attempt + 1}/${MAX_RETRIES})`);
         await new Promise(r => setTimeout(r, 3000));
-        data = await doSearch();
+        data = await doSearch(true);
       }
 
       if (!data) {
@@ -522,13 +523,14 @@ export default class IqiyiSource extends BaseSource {
 
     // base_info 接口可能返回空响应或结构残缺的响应，此处最多重试两次再放弃
     const MAX_EPISODE_RETRIES = 2;
-    const fetchEpisodeData = async () => {
+    const fetchEpisodeData = async (bypassCache = false) => {
       try {
         const resp = await httpGet(url, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Referer': 'https://www.iqiyi.com/'
-          }
+          },
+          bypassCache
         });
         if (!resp || !resp.data) return null;
         return typeof resp.data === "string" ? JSON.parse(resp.data) : resp.data;
@@ -542,7 +544,7 @@ export default class IqiyiSource extends BaseSource {
     for (let attempt = 0; attempt < MAX_EPISODE_RETRIES && (!data || data.status_code !== 0 || !data.data || !data.data.template); attempt++) {
       log("info", `[iqiyi] 分集接口返回异常${data ? ` (status_code: ${data.status_code})` : " (响应为空或解析失败)"}，等待 3 秒后重试 (${attempt + 1}/${MAX_EPISODE_RETRIES})`);
       await new Promise(r => setTimeout(r, 3000));
-      data = await fetchEpisodeData();
+      data = await fetchEpisodeData(true);
     }
 
     if (!data || data.status_code !== 0 || !data.data || !data.data.template) {
@@ -972,6 +974,7 @@ export default class IqiyiSource extends BaseSource {
             "Content-Type": "application/json",
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
           },
+          bypassCache: true
         });
         const retryData = typeof retryRes.data === "string" ? JSON.parse(retryRes.data) : retryRes.data;
         const retryDuration = Number(retryData.data.durationSec) || 0;

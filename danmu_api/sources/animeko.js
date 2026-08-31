@@ -81,7 +81,7 @@ export default class AnimekoSource extends BaseSource {
    */
   _getSubjectServerPriority() {
     const officialBase = "https://api.bgm.tv";
-    const mirrorBase = "https://api.bangumi.lol";
+    const mirrorBase = "https://api.bangumi.pro";
     // 获取可能被代理的官方 URL
     const proxyOfficialBase = this._applyProxyForSearch(officialBase);
 
@@ -350,7 +350,7 @@ export default class AnimekoSource extends BaseSource {
       while (true) {
         const searchPath = `/v0/search/subjects?limit=${limit}&offset=${offset}`;
         const officialUrl = `https://api.bgm.tv${searchPath}`;
-        const mirrorUrl = `https://api.bangumi.lol${searchPath}`;
+        const mirrorUrl = `https://api.bangumi.pro${searchPath}`;
         
         // 获取可能被代理的官方 URL
         const proxySearchUrl = this._applyProxyForSearch(officialUrl);
