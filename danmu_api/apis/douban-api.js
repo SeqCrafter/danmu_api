@@ -45,61 +45,6 @@ const doubanSource = new DoubanSource(
   miguSource,
 );
 
-// 后处理弹幕数据：将对象格式转换为数组格式
-// 输入格式：{ count: 123, comments: [{cid: 1, p: "0.00,1,16777215,[qq]", m: "弹幕", t: 0}] }
-// 输出格式：{ code: 0, name: "123", danum: 123, danmuku: [[0, "right", "#FFFFFF", "25px", "弹幕"]] }
-export function postProcessDanmu(danmuData) {
-  // RGB 整数转 Hex 字符串
-  const intToHex = (num) => {
-    const hex = parseInt(num).toString(16).toUpperCase().padStart(6, "0");
-    return `#${hex}`;
-  };
-
-  // 位置映射：1,2,3 -> "right", 4 -> "top", 5 -> "bottom"
-  const modeToPosition = (mode) => {
-    const modeNum = parseInt(mode);
-    if (modeNum === 4) return "top";
-    if (modeNum === 5) return "bottom";
-    return "right"; // 1, 2, 3 都是 right
-  };
-
-  // 转换每个弹幕对象为数组格式
-  const danmuku = (danmuData.comments || []).map((comment) => {
-    const pValues = comment.p.split(",");
-    const time = parseFloat(pValues[0]) || 0;
-    const position = modeToPosition(pValues[1]);
-    const color = intToHex(pValues[2] || 16777215);
-    const fontSize = "25px";
-    const content = comment.m || "";
-
-    return [time, position, color, fontSize, content];
-  });
-
-  // 返回新格式
-  return {
-    code: danmuData.errorCode,
-    name: String(danmuData.url || ""), // 使用 url 作为 name 的值
-    danum: danmuData.count || 0,
-    danmuku: danmuku,
-  };
-}
-
-// 豆瓣接口专用的 JSON 输出适配。保持在定制模块内，避免影响上游的通用弹幕格式化逻辑。
-export async function formatDoubanDanmuResponse(response, queryFormat) {
-  const format = (queryFormat || globals.danmuOutputFormat || "json").toLowerCase();
-  if (format !== "json" || !response.ok) {
-    return response;
-  }
-
-  try {
-    const danmuData = await response.clone().json();
-    return jsonResponse(postProcessDanmu(danmuData), response.status);
-  } catch (error) {
-    log("warn", `Failed to post-process douban danmu response: ${error.message}`);
-    return response;
-  }
-}
-
 // 根据集数匹配episode（优先使用集标题中的集数，其次使用episodeNumber，最后使用数组索引）
 function findEpisodeByNumber(filteredEpisodes, targetEpisode, platform = null) {
   if (!filteredEpisodes || filteredEpisodes.length === 0) {
@@ -421,9 +366,7 @@ export async function getAnimeByDouban(url) {
 
   log("info", `Found URL for episodeId ${episodeId}: ${videoUrl}`);
 
-  // getCommentByUrl 内部会处理缓存检查和弹幕获取。
-  // 仅在豆瓣接口内转换 JSON 输出，不修改上游通用格式化函数。
+  // getCommentByUrl 内部会处理缓存检查、弹幕获取和统一的输出格式转换。
   log("info", `Fetching comments from URL: ${videoUrl}`);
-  const response = await getCommentByUrl(videoUrl, queryFormat, segmentFlag);
-  return formatDoubanDanmuResponse(response, queryFormat);
+  return getCommentByUrl(videoUrl, queryFormat, segmentFlag);
 }
