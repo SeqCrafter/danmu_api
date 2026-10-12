@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { Readable } from 'node:stream';
 import { parseLocalDanmu } from '../utils/local-danmu-parser.js';
-import { handleRequest } from '../worker.js';
+import { handleRequest, netlifyHandler, vercelHandler } from '../worker.js';
 import { MockRequest, parseResponse, readRequestBody, urlPrefix } from './helpers/context.js';
 import { localDanmuEncodings, localDanmuExpected, localDanmuJson } from './helpers/local-danmu.js';
 import { matchAnime, searchAnime } from '../apis/dandan-api.js';
@@ -647,4 +647,197 @@ test('GET /api/v2/search/anime should filter by request snapshot instead of coll
     Globals.envs.episodeTitleFilter = originalEpisodeTitleFilter;
     Globals.envs.animeTitleFilter = originalAnimeTitleFilter;
   }
+});
+
+// ============================================================================
+// worker.js 路由 / 鉴权 / 限流 / 平台适配层
+// 说明：请求级断言全部走 handleRequest，deployPlatform 用 'cloudflare' 以跳过
+// 仅在 node 平台生效的本地缓存/本地 Redis 判定；env 里**不要**设置 AI_API_KEY /
+// AI_BASE_URL（设置后 handleRequest 会先对 AI 服务发起真实连通性校验）。
+// ============================================================================
+
+const routingEnv = (extra = {}) => ({
+  LOG_LEVEL: 'error',
+  LOCAL_CACHE_ENABLED: 'false',
+  RATE_LIMIT_MAX_REQUESTS: '0',
+  ...extra,
+});
+
+const callWorker = async (url, { method = 'GET', body, headers, env = {}, platform = 'cloudflare', ip = '127.0.0.1' } = {}) => {
+  Globals.requestHistory = new Map();
+  const response = await handleRequest(
+    new Request(url, { method, body, headers }),
+    routingEnv(env),
+    platform,
+    ip,
+  );
+  const text = await response.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch { /* 非 JSON 响应 */ }
+  return { response, status: response.status, text, json };
+};
+
+test('worker 边缘入口：favicon / robots.txt / OPTIONS 直接返回 204 与 CORS 头', async () => {
+  for (const [label, url, method] of [
+    ['favicon', 'http://localhost/favicon.ico', 'GET'],
+    ['robots', 'http://localhost/robots.txt', 'GET'],
+    ['OPTIONS 预检', 'http://localhost/api/v2/search/anime', 'OPTIONS'],
+  ]) {
+    const { response, status, text } = await callWorker(url, { method });
+    assert.strictEqual(status, 204, `${label} 应返回 204`);
+    assert.strictEqual(response.headers.get('access-control-allow-origin'), '*');
+    assert.strictEqual(response.headers.get('access-control-allow-methods'), 'GET, POST, PUT, DELETE, OPTIONS');
+    assert.strictEqual(response.headers.get('access-control-allow-headers'), 'Content-Type, Authorization, User-Agent');
+    assert.strictEqual(text, '', `${label} 不应有响应体`);
+  }
+});
+
+test('worker 默认 TOKEN：未知首段视为错误 token 返回 401，已知 API 首段放行', async () => {
+  const unknown = await callWorker('http://localhost/not-a-known-path/x');
+  assert.strictEqual(unknown.status, 401, '未知首段应按错误 token 处理');
+  assert.strictEqual(unknown.json.errorCode, 401);
+  assert.strictEqual(unknown.json.errorMessage, 'Unauthorized');
+
+  // 已知 API 首段（api）允许无 token 访问，/api/config 降级为无权限视图
+  const limited = await callWorker('http://localhost/api/config');
+  assert.strictEqual(limited.status, 200);
+  assert.strictEqual(limited.json.message, 'Welcome to the LogVar Danmu API server');
+  assert.match(limited.json.envs.TOKEN, /^\*+$/, '无权限时 token 以掩码返回');
+
+  const withToken = await callWorker('http://localhost/87654321/api/does-not-exist');
+  assert.strictEqual(withToken.status, 404, '带正确 token 的未知路径应走到 404');
+  assert.strictEqual(withToken.json.message, 'Not found');
+});
+
+test('worker 自定义 TOKEN：缺 token 401，错 token 401，只有 ADMIN_TOKEN 能看到明文敏感值', async () => {
+  const env = { TOKEN: 'user-token-1', ADMIN_TOKEN: 'admin-tok', UPSTASH_REDIS_REST_TOKEN: 'up-secret' };
+
+  const noToken = await callWorker('http://localhost/api/config', { env });
+  assert.strictEqual(noToken.status, 200, '/api/config 允许无 token 但只能拿到受限视图');
+  assert.match(noToken.json.originalEnvVars.UPSTASH_REDIS_REST_TOKEN, /^\*+$/, '用户视图脱敏');
+
+  const wrongToken = await callWorker('http://localhost/wrong-token/api/config', { env });
+  assert.strictEqual(wrongToken.status, 401);
+  assert.strictEqual(wrongToken.json.errorMessage, 'Unauthorized');
+
+  const userToken = await callWorker('http://localhost/user-token-1/api/config', { env });
+  assert.strictEqual(userToken.status, 200);
+  assert.match(userToken.json.originalEnvVars.UPSTASH_REDIS_REST_TOKEN, /^\*+$/, '普通 token 仍脱敏');
+
+  const adminToken = await callWorker('http://localhost/admin-tok/api/config', { env });
+  assert.strictEqual(adminToken.status, 200);
+  assert.strictEqual(adminToken.json.originalEnvVars.UPSTASH_REDIS_REST_TOKEN, 'up-secret',
+    'ADMIN_TOKEN 才返回明文敏感值');
+  assert.match(adminToken.json.envs.UPSTASH_REDIS_REST_TOKEN, /^\*+$/, '预览视图始终脱敏');
+
+  const searchWithoutToken = await callWorker('http://localhost/api/v2/search/anime?keyword=test', { env });
+  assert.strictEqual(searchWithoutToken.status, 401, '自定义 TOKEN 下业务接口必须带 token');
+});
+
+test('worker 收藏写接口：自定义 TOKEN 下必须显式携带 token', async () => {
+  const env = { TOKEN: 'user-token-1', ADMIN_TOKEN: 'admin-tok' };
+  const { status, json } = await callWorker('http://localhost/api/v2/favorite/add', { method: 'POST', env });
+  assert.strictEqual(status, 401);
+  assert.strictEqual(json.errorMessage, 'Favorite API requires an explicit token');
+});
+
+test('worker FAVORITE_REQUIRE_ADMIN：普通 token 403，ADMIN_TOKEN 才进入处理器', async () => {
+  const env = { ADMIN_TOKEN: 'admin-tok', FAVORITE_REQUIRE_ADMIN: 'true' };
+
+  const userPath = await callWorker('http://localhost/87654321/api/v2/favorite/add', { method: 'POST', env });
+  assert.strictEqual(userPath.status, 403);
+  assert.strictEqual(userPath.json.message, '权限不足');
+  assert.strictEqual(userPath.json.errorMessage, 'Favorite API requires ADMIN_TOKEN');
+
+  // 用 ADMIN_TOKEN 通过闸门后会落到处理器，因缺少 keyword 返回 400（证明已进入收藏逻辑而非被拦）
+  const adminPath = await callWorker('http://localhost/admin-tok/api/v2/favorite/add', {
+    method: 'POST', env, headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  assert.strictEqual(adminPath.status, 400);
+  assert.strictEqual(adminPath.json.message, '缺少 keyword 或 fileName 参数');
+});
+
+test('worker 收藏列表是公开只读接口，不要求 token', async () => {
+  const env = { TOKEN: 'user-token-1', ADMIN_TOKEN: 'admin-tok' };
+  const { status, json } = await callWorker('http://localhost/api/v2/favorite/list', { env });
+  assert.strictEqual(status, 200, '自定义 TOKEN 下收藏列表仍可匿名读取');
+  assert.strictEqual(json.success, true);
+  assert.strictEqual(json.favoriteSupported, false, '云平台未配置 Redis 时明确标记收藏不可用');
+});
+
+test('worker IP 黑名单：精确与正则规则命中即 403，未命中放行', async () => {
+  const exact = await callWorker('http://localhost/api/config', { env: { IP_BLACKLIST: '203.0.113.9' }, ip: '203.0.113.9' });
+  assert.strictEqual(exact.status, 403);
+  assert.strictEqual(exact.json.errorMessage, 'Forbidden');
+
+  const otherIp = await callWorker('http://localhost/api/config', { env: { IP_BLACKLIST: '203.0.113.9' }, ip: '198.51.100.7' });
+  assert.strictEqual(otherIp.status, 200, '未命中黑名单的 IP 不应被拦');
+
+  const regexHit = await callWorker('http://localhost/api/config', { env: { IP_BLACKLIST: '/^10\\./' }, ip: '10.1.2.3' });
+  assert.strictEqual(regexHit.status, 403, '支持 /pattern/ 形式的正则规则');
+
+  const cidrHit = await callWorker('http://localhost/api/config', { env: { IP_BLACKLIST: '192.168.0.0/16' }, ip: '192.168.5.5' });
+  assert.strictEqual(cidrHit.status, 403, '支持 CIDR 规则');
+});
+
+test('worker 限流：窗口内已达上限返回 429 且不再记录新请求', async () => {
+  Globals.requestHistory = new Map([['9.9.9.9', [Date.now()]]]);
+  const response = await handleRequest(
+    new Request('http://localhost/api/v2/comment?url=https://v.qq.com/x/cover/a/b.html&format=json'),
+    routingEnv({ RATE_LIMIT_MAX_REQUESTS: '1' }),
+    'cloudflare',
+    '9.9.9.9',
+  );
+  const body = JSON.parse(await response.text());
+  assert.strictEqual(response.status, 429);
+  assert.strictEqual(body.errorCode, 429);
+  assert.strictEqual(body.errorMessage, 'Too many requests, please try again later');
+  assert.deepStrictEqual(Globals.requestHistory.get('9.9.9.9').length, 1, '被限流的请求不应写入历史');
+});
+
+test('worker /api/v2/segmentcomment 请求体无法构成 Segment 时返回 400', async () => {
+  const { status, json } = await callWorker('http://localhost/api/v2/segmentcomment', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  assert.strictEqual(status, 400);
+  assert.strictEqual(json.errorCode, 400);
+  assert.strictEqual(json.errorMessage, 'Invalid JSON in request body');
+});
+
+test('worker /api/debug/forward-trace 需要显式 token，通过后写入日志缓冲', async () => {
+  const env = { TOKEN: 'user-token-1' };
+  const anonymous = await callWorker('http://localhost/api/debug/forward-trace', {
+    method: 'POST', env, headers: { 'content-type': 'application/json' }, body: '{"handler":"x"}',
+  });
+  assert.strictEqual(anonymous.status, 401);
+  assert.strictEqual(anonymous.json.errorMessage, 'Unauthorized');
+
+  const authorized = await callWorker('http://localhost/user-token-1/api/debug/forward-trace', {
+    method: 'POST', env, headers: { 'content-type': 'application/json' }, body: '{"handler":"worker-routing-test"}',
+  });
+  assert.strictEqual(authorized.status, 202);
+  assert.strictEqual(authorized.json.success, true);
+});
+
+test('worker 平台适配层：netlifyHandler / vercelHandler 映射为标准响应', async () => {
+  const netlifyOut = await netlifyHandler(
+    { rawUrl: 'http://localhost/favicon.ico', httpMethod: 'GET', headers: {} },
+    { ip: '127.0.0.1' },
+  );
+  assert.strictEqual(netlifyOut.statusCode, 204);
+  assert.strictEqual(netlifyOut.headers['access-control-allow-origin'], '*');
+  assert.strictEqual(netlifyOut.body, '');
+
+  const captured = { status: null, headers: {}, body: null };
+  await vercelHandler(
+    { url: 'http://localhost/favicon.ico', method: 'GET', headers: { 'x-forwarded-for': '203.0.113.7' } },
+    {
+      status(value) { captured.status = value; },
+      setHeader(key, value) { captured.headers[key] = value; },
+      send(value) { captured.body = value; },
+    },
+  );
+  assert.strictEqual(captured.status, 204);
+  assert.strictEqual(captured.headers['access-control-allow-origin'], '*');
+  assert.strictEqual(captured.body, '');
 });

@@ -179,6 +179,10 @@ LogVar 弹幕 API 服务器
    > `danmu_api/tests/manual/live-source-checks.js` 是依赖真实数据源的手工巡检用例，不会被自动发现、也不参与 `npm test`；
    > 手动执行：`node --test danmu_api/tests/manual/live-source-checks.js`（详见文件头说明）；
    > 其中写入真实平台环境变量 / 触发真实部署 / 写真实 Redis 的用例默认跳过，需要时加 `LIVE_SOURCE_WRITE_CHECKS=true`。
+   > 提交 PR 或推送到 main 时会由 `.github/workflows/test.yml` 自动执行 `npm install` + `npm test`（无需任何 secrets，
+   > 也不访问外网/Redis，fork PR 同样会跑）；CI 使用 Node 24，**运行测试需要 Node ≥ 22.3**——
+   > `configs/cache-persistence.test.js` 与 `configs/cache-backends.test.js` 的子进程依赖 `--experimental-test-module-mocks`。
+   > 全新 clone 里没有 `config/.env`（仅跟踪 `config/.env.example`），相关用例会自行临时生成并清理，无需手工准备。
 
 5. **测试 API**：
    使用 Postman 或 curl 测试：

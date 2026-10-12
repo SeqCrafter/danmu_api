@@ -10,7 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Globals } from '../../configs/globals.js';
 import { Bangumi, Season } from '../../models/dandan-model.js';
-import { initBangumiData, clearBangumiDataCache } from '../../utils/bangumi-data-util.js';
+import { initBangumiData, clearBangumiDataCache, getBackgroundDownload, PRUNED_ITEM_FIELDS } from '../../utils/bangumi-data-util.js';
 import { getTmdbJaOriginalTitle, stripSeasonMarker, cleanSearchQuery, smartTitleReplace } from '../../utils/tmdb-util.js';
 import { mockJsonResponse, withMockFetch } from '../helpers/context.js';
 
@@ -40,6 +40,9 @@ test('tmdb getTmdbJaOriginalTitle 按 Bangumi Data 原名剥离分部标记', as
   try {
     await fs.mkdir(path.dirname(cachePath), { recursive: true });
     await fs.writeFile(cachePath, JSON.stringify({
+      // 必须带上当前裁剪字段清单：缺 prunedFields 会被 isCacheFormatOutdated 判定为未按当前规则裁剪，
+      // 从而触发真实 CDN 版本查询与下载（走 node-fetch，withMockFetch 拦不住）。
+      prunedFields: PRUNED_ITEM_FIELDS,
       items: [{
         title: 'スティール・ボール・ラン ジョジョの奇妙な冒険 1st STAGE',
         type: 'tv',
@@ -51,6 +54,8 @@ test('tmdb getTmdbJaOriginalTitle 按 Bangumi Data 原名剥离分部标记', as
     }));
     Globals.envs.useBangumiData = true;
     await initBangumiData('node', true);
+    // 本用例只验证检索词剥离，缓存格式合法时不得启动任何后台下载（防止悄悄打真实 CDN）
+    assert.strictEqual(getBackgroundDownload(), null, '按当前规则裁剪的缓存不应触发后台下载');
 
     const result = await getTmdbJaOriginalTitle('飙马野郎', null, 'Bahamut');
     assert.strictEqual(result.title, 'スティール・ボール・ラン ジョジョの奇妙な冒険', '出站检索词剥离分部标记');
